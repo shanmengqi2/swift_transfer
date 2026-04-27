@@ -20,18 +20,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 
-    const { fileName, contentType, size } = validation.data;
+    const { fileName, contentType } = validation.data;
     const uniqueKey = `${uuidv4()}-${fileName}`;
+    const resolvedContentType = contentType || "application/octet-stream";
 
     const command = new PutObjectCommand({
       Bucket: process.env.S3_BUCKET_NAME,
       Key: uniqueKey,
-      ContentType: contentType,
+      ContentType: resolvedContentType,
       // ContentLength: size,
     });
     console.log("bucket", process.env.S3_BUCKET_NAME);
     console.log("Key", uniqueKey);
-    console.log("contentType", contentType);
+    console.log("contentType", resolvedContentType);
     const presignedUrl = await getSignedUrl(S3, command, { expiresIn: 3600 });
     // return NextResponse.json({ presignedUrl });
     const response = {
