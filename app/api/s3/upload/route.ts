@@ -3,7 +3,10 @@ import { z } from "zod";
 import { v4 as uuidv4 } from "uuid";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { getBucketName } from "@/lib/files";
 import { S3 } from "@/lib/s3Client";
+
+export const runtime = "nodejs";
 
 const uploadRequestSchema = z.object({
   fileName: z.string(),
@@ -23,16 +26,14 @@ export async function POST(request: Request) {
     const { fileName, contentType } = validation.data;
     const uniqueKey = `${uuidv4()}-${fileName}`;
     const resolvedContentType = contentType || "application/octet-stream";
+    const bucket = getBucketName();
 
     const command = new PutObjectCommand({
-      Bucket: process.env.S3_BUCKET_NAME,
+      Bucket: bucket,
       Key: uniqueKey,
       ContentType: resolvedContentType,
       // ContentLength: size,
     });
-    console.log("bucket", process.env.S3_BUCKET_NAME);
-    console.log("Key", uniqueKey);
-    console.log("contentType", resolvedContentType);
     const presignedUrl = await getSignedUrl(S3, command, { expiresIn: 3600 });
     // return NextResponse.json({ presignedUrl });
     const response = {

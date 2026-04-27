@@ -1,9 +1,14 @@
 import { Uploader } from "@/components/web/Uploader";
+import { PageHeader } from "@/components/web/PageHeader";
 
 export default function Home() {
   return (
-    <div className="max-w-2xl mx-auto flex min-h-screen flex-col items-center justify-center ">
-      <h1 className="text-4xl font-bold pb-10">Upload your Files with S3 📂</h1>
+    <div className="mx-auto flex min-h-screen w-full max-w-2xl flex-col px-4 py-16 sm:px-6 lg:px-8">
+      <PageHeader
+        title="Upload your Files with S3"
+        description="Drop files into object storage, then jump to the manager to create download links or remove files."
+        activePage="upload"
+      />
       <Uploader />
     </div>
   );

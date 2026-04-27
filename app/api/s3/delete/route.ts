@@ -1,6 +1,10 @@
 import { DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { NextResponse } from "next/server";
+import { getBucketName } from "@/lib/files";
+import { deletePresignedLink } from "@/lib/presignedLinks";
 import { S3 } from "@/lib/s3Client";
+
+export const runtime = "nodejs";
 
 export async function DELETE(request: Request) {
   try {
@@ -11,31 +15,15 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "Key is required" }, { status: 400 });
     }
 
-    const {
-      AWS_ACCESS_KEY_ID,
-      AWS_SECRET_ACCESS_KEY,
-      AWS_REGION,
-      S3_BUCKET_NAME,
-    } = process.env;
-
-    if (
-      !AWS_ACCESS_KEY_ID ||
-      !AWS_SECRET_ACCESS_KEY ||
-      !AWS_REGION ||
-      !S3_BUCKET_NAME
-    ) {
-      return NextResponse.json(
-        { error: "Environment variables are not set" },
-        { status: 500 },
-      );
-    }
+    const bucket = getBucketName();
 
     const command = new DeleteObjectCommand({
-      Bucket: S3_BUCKET_NAME,
+      Bucket: bucket,
       Key: key,
     });
 
     await S3.send(command);
+    deletePresignedLink(key);
 
     return NextResponse.json(
       { message: "Object deleted successfully" },
