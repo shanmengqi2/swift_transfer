@@ -3,15 +3,51 @@ import { z } from "zod";
 import { v4 as uuidv4 } from "uuid";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { getBucketName } from "@/lib/files";
+import {
+  getBucketName,
+  normalizeUploadedContentType,
+  normalizeUploadedFileName,
+} from "@/lib/files";
 import { S3 } from "@/lib/s3Client";
 
 export const runtime = "nodejs";
 
+const DEFAULT_MAX_FILES = 10;
+const DEFAULT_MAX_FILE_SIZE_MB = 50;
+const BYTES_PER_MB = 1024 * 1024;
+
+function getPositiveIntegerEnv(name: string, fallback: number) {
+  const value = process.env[name];
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function getUploadLimits() {
+  const maxFiles = getPositiveIntegerEnv(
+    "NEXT_PUBLIC_MAX_FILES",
+    DEFAULT_MAX_FILES,
+  );
+  const maxFileSizeMb = getPositiveIntegerEnv(
+    "NEXT_PUBLIC_MAX_FILE_SIZE_MB",
+    DEFAULT_MAX_FILE_SIZE_MB,
+  );
+
+  return {
+    maxFiles,
+    maxFileSizeMb,
+    maxFileSizeBytes: maxFileSizeMb * BYTES_PER_MB,
+  };
+}
+
 const uploadRequestSchema = z.object({
-  fileName: z.string(),
-  contentType: z.string(),
-  size: z.number(),
+  fileName: z.string().min(1),
+  contentType: z.string().min(1),
+  size: z.number().int().positive(),
+  batchFileCount: z.number().int().positive(),
 });
 
 export async function POST(request: Request) {
@@ -23,16 +59,38 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 
-    const { fileName, contentType } = validation.data;
-    const uniqueKey = `${uuidv4()}-${fileName}`;
-    const resolvedContentType = contentType || "application/octet-stream";
+    const { fileName, contentType, size, batchFileCount } = validation.data;
+    const limits = getUploadLimits();
+
+    if (batchFileCount > limits.maxFiles) {
+      return NextResponse.json(
+        { error: `You can only upload up to ${limits.maxFiles} files.` },
+        { status: 413 },
+      );
+    }
+
+    if (size > limits.maxFileSizeBytes) {
+      return NextResponse.json(
+        {
+          error: `Each file must be less than ${limits.maxFileSizeMb}MB.`,
+        },
+        { status: 413 },
+      );
+    }
+
+    const normalizedFileName = normalizeUploadedFileName(fileName);
+    const uniqueKey = `${uuidv4()}-${normalizedFileName}`;
+    const resolvedContentType = normalizeUploadedContentType(
+      fileName,
+      contentType,
+    );
     const bucket = getBucketName();
 
     const command = new PutObjectCommand({
       Bucket: bucket,
       Key: uniqueKey,
       ContentType: resolvedContentType,
-      // ContentLength: size,
+      ContentLength: size,
     });
     const presignedUrl = await getSignedUrl(S3, command, { expiresIn: 3600 });
     // return NextResponse.json({ presignedUrl });

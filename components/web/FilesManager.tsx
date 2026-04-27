@@ -11,7 +11,9 @@ import {
   Loader2,
   MoreHorizontal,
   RefreshCw,
+  Search,
   Trash2,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -36,12 +38,12 @@ type SortState = {
 };
 type LinkDialogState = {
   file: ManagedFile;
-  expiresInMinutes: number;
+  expiresInMinutes: string;
   isGenerating: boolean;
 };
 
 type DeleteDialogState = {
-  file: ManagedFile;
+  files: ManagedFile[];
   isDeleting: boolean;
 };
 
@@ -50,6 +52,17 @@ type DownloadLink = {
   expiresAt: string;
   createdAt: string;
 };
+
+type ExpiryPreset = {
+  label: string;
+  minutes: string;
+};
+
+const EXPIRY_PRESETS: ExpiryPreset[] = [
+  { label: "1 hour", minutes: "60" },
+  { label: "1 day", minutes: "1440" },
+  { label: "7 days", minutes: "10080" },
+];
 
 function formatBytes(bytes: number) {
   if (bytes === 0) {
@@ -107,6 +120,8 @@ export function FilesManager() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [page, setPage] = useState(1);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<SortState>({
     key: "lastModified",
     direction: "desc",
@@ -157,6 +172,7 @@ export function FilesManager() {
     try {
       const loadedFiles = await fetchFiles();
       setFiles(loadedFiles);
+      setSelectedKeys(new Set());
       setPage(1);
     } catch {
       toast.error("Failed to load files");
@@ -165,8 +181,22 @@ export function FilesManager() {
     }
   };
 
+  const filteredFiles = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
+
+    if (!normalizedQuery) {
+      return files;
+    }
+
+    return files.filter(
+      (file) =>
+        file.fileName.toLocaleLowerCase().includes(normalizedQuery) ||
+        file.key.toLocaleLowerCase().includes(normalizedQuery),
+    );
+  }, [files, searchQuery]);
+
   const sortedFiles = useMemo(() => {
-    return [...files].sort((a, b) => {
+    return [...filteredFiles].sort((a, b) => {
       const aValue = sortValue(a, sort.key);
       const bValue = sortValue(b, sort.key);
       const result =
@@ -176,7 +206,7 @@ export function FilesManager() {
 
       return sort.direction === "asc" ? result : -result;
     });
-  }, [files, sort]);
+  }, [filteredFiles, sort]);
 
   const totalPages = Math.max(1, Math.ceil(sortedFiles.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -184,6 +214,17 @@ export function FilesManager() {
     (currentPage - 1) * PAGE_SIZE,
     currentPage * PAGE_SIZE,
   );
+  const selectedFiles = useMemo(
+    () => files.filter((file) => selectedKeys.has(file.key)),
+    [files, selectedKeys],
+  );
+  const currentPageKeys = paginatedFiles.map((file) => file.key);
+  const allCurrentPageSelected =
+    currentPageKeys.length > 0 &&
+    currentPageKeys.every((key) => selectedKeys.has(key));
+  const partiallySelected =
+    currentPageKeys.some((key) => selectedKeys.has(key)) &&
+    !allCurrentPageSelected;
 
   const changeSort = (key: SortKey) => {
     setSort((currentSort) => ({
@@ -199,13 +240,51 @@ export function FilesManager() {
   const openLinkDialog = (file: ManagedFile) => {
     setLinkDialog({
       file,
-      expiresInMinutes: DEFAULT_EXPIRES_IN_MINUTES,
+      expiresInMinutes: String(DEFAULT_EXPIRES_IN_MINUTES),
       isGenerating: false,
+    });
+  };
+
+  const toggleFileSelection = (key: string) => {
+    setSelectedKeys((currentKeys) => {
+      const nextKeys = new Set(currentKeys);
+
+      if (nextKeys.has(key)) {
+        nextKeys.delete(key);
+      } else {
+        nextKeys.add(key);
+      }
+
+      return nextKeys;
+    });
+  };
+
+  const toggleCurrentPageSelection = () => {
+    setSelectedKeys((currentKeys) => {
+      const nextKeys = new Set(currentKeys);
+
+      if (allCurrentPageSelected) {
+        currentPageKeys.forEach((key) => nextKeys.delete(key));
+      } else {
+        currentPageKeys.forEach((key) => nextKeys.add(key));
+      }
+
+      return nextKeys;
     });
   };
 
   const generateDownloadLink = async () => {
     if (!linkDialog) {
+      return;
+    }
+
+    const expiresInMinutes = Number(linkDialog.expiresInMinutes);
+    if (
+      !Number.isFinite(expiresInMinutes) ||
+      expiresInMinutes < 1 ||
+      expiresInMinutes > 10080
+    ) {
+      toast.error("Valid time must be between 1 minute and 7 days");
       return;
     }
 
@@ -217,7 +296,7 @@ export function FilesManager() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           key: linkDialog.file.key,
-          expiresInSeconds: linkDialog.expiresInMinutes * 60,
+          expiresInSeconds: expiresInMinutes * 60,
         }),
       });
 
@@ -252,7 +331,7 @@ export function FilesManager() {
     }
   };
 
-  const deleteFile = async () => {
+  const deleteFiles = async () => {
     if (!deleteDialog) {
       return;
     }
@@ -260,23 +339,44 @@ export function FilesManager() {
     setDeleteDialog({ ...deleteDialog, isDeleting: true });
 
     try {
-      const response = await fetch("/api/s3/delete", {
-        method: "DELETE",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ key: deleteDialog.file.key }),
-      });
+      const responses = await Promise.all(
+        deleteDialog.files.map((file) =>
+          fetch("/api/s3/delete", {
+            method: "DELETE",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ key: file.key }),
+          }),
+        ),
+      );
 
-      if (!response.ok) {
-        throw new Error("Failed to delete file");
+      if (responses.some((response) => !response.ok)) {
+        throw new Error("Failed to delete files");
       }
 
+      const deletedKeys = new Set(deleteDialog.files.map((file) => file.key));
       setFiles((currentFiles) =>
-        currentFiles.filter((file) => file.key !== deleteDialog.file.key),
+        currentFiles.filter((file) => !deletedKeys.has(file.key)),
+      );
+      setSelectedKeys((currentKeys) => {
+        const nextKeys = new Set(currentKeys);
+        deletedKeys.forEach((key) => nextKeys.delete(key));
+        return nextKeys;
+      });
+      setPage((current) =>
+        Math.min(
+          current,
+          Math.max(
+            1,
+            Math.ceil((sortedFiles.length - deletedKeys.size) / PAGE_SIZE),
+          ),
+        ),
       );
       setDeleteDialog(null);
-      toast.success("File deleted");
+      toast.success(
+        deleteDialog.files.length === 1 ? "File deleted" : "Files deleted",
+      );
     } catch {
-      toast.error("Failed to delete file");
+      toast.error("Failed to delete files");
       setDeleteDialog((currentDialog) =>
         currentDialog ? { ...currentDialog, isDeleting: false } : null,
       );
@@ -303,27 +403,91 @@ export function FilesManager() {
             <div>
               <p className="text-sm font-medium">Object storage files</p>
               <p className="text-xs text-muted-foreground">
-                {files.length} files in the configured bucket
+                {filteredFiles.length} of {files.length} files
               </p>
             </div>
-            <Button
-              variant="outline"
-              onClick={() => void refreshFiles()}
-              disabled={isRefreshing}
-            >
-              {isRefreshing ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <RefreshCw className="size-4" />
+            <div className="flex flex-wrap items-center gap-2">
+              {selectedFiles.length > 0 && (
+                <Button
+                  variant="destructive"
+                  onClick={() =>
+                    setDeleteDialog({
+                      files: selectedFiles,
+                      isDeleting: false,
+                    })
+                  }
+                >
+                  <Trash2 className="size-4" />
+                  Delete selected
+                </Button>
               )}
-              Refresh
-            </Button>
+              <Button
+                variant="outline"
+                onClick={() => void refreshFiles()}
+                disabled={isRefreshing}
+              >
+                {isRefreshing ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-4" />
+                )}
+                Refresh
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <label className="relative w-full sm:max-w-sm">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(event) => {
+                  setSearchQuery(event.target.value);
+                  setSelectedKeys(new Set());
+                  setPage(1);
+                }}
+                placeholder="Search by file name"
+                className="h-9 w-full rounded-lg border bg-background pr-9 pl-9 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  className="absolute right-2 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                  onClick={() => {
+                    setSearchQuery("");
+                    setSelectedKeys(new Set());
+                    setPage(1);
+                  }}
+                  aria-label="Clear search"
+                >
+                  <X className="size-3.5" />
+                </button>
+              )}
+            </label>
+            {selectedFiles.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {selectedFiles.length} selected
+              </p>
+            )}
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[920px] table-fixed text-sm">
+            <table className="w-full min-w-[980px] table-fixed text-sm">
               <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
                 <tr className="border-b">
+                  <th className="w-12 px-4 py-3 font-medium">
+                    <input
+                      type="checkbox"
+                      checked={allCurrentPageSelected}
+                      aria-checked={
+                        partiallySelected ? "mixed" : allCurrentPageSelected
+                      }
+                      onChange={toggleCurrentPageSelection}
+                      aria-label="Select current page"
+                      className="size-4 rounded border-border accent-primary"
+                    />
+                  </th>
                   <th className="w-44 px-4 py-3 font-medium">Bucket</th>
                   <th className="w-72 px-4 py-3 font-medium">
                     <button
@@ -364,7 +528,7 @@ export function FilesManager() {
               <tbody>
                 {isLoading ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-12 text-center">
+                    <td colSpan={7} className="px-4 py-12 text-center">
                       <div className="flex items-center justify-center gap-2 text-muted-foreground">
                         <Loader2 className="size-4 animate-spin" />
                         Loading files
@@ -374,7 +538,7 @@ export function FilesManager() {
                 ) : paginatedFiles.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={7}
                       className="px-4 py-12 text-center text-muted-foreground"
                     >
                       No files found.
@@ -386,6 +550,15 @@ export function FilesManager() {
 
                     return (
                       <tr key={file.key} className="border-b last:border-b-0">
+                        <td className="px-4 py-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedKeys.has(file.key)}
+                            onChange={() => toggleFileSelection(file.key)}
+                            aria-label={`Select ${file.fileName}`}
+                            className="size-4 rounded border-border accent-primary"
+                          />
+                        </td>
                         <td className="truncate px-4 py-3 text-muted-foreground">
                           {file.bucket}
                         </td>
@@ -439,7 +612,7 @@ export function FilesManager() {
                                 variant="destructive"
                                 onSelect={() =>
                                   setDeleteDialog({
-                                    file,
+                                    files: [file],
                                     isDeleting: false,
                                   })
                                 }
@@ -515,21 +688,43 @@ export function FilesManager() {
 
                 <label className="flex flex-col gap-1 text-sm font-medium">
                   Valid for minutes
+                  <div className="mb-1 flex flex-wrap gap-2">
+                    {EXPIRY_PRESETS.map((preset) => (
+                      <Button
+                        key={preset.minutes}
+                        type="button"
+                        variant={
+                          linkDialog.expiresInMinutes === preset.minutes
+                            ? "default"
+                            : "outline"
+                        }
+                        size="sm"
+                        onClick={() =>
+                          setLinkDialog({
+                            ...linkDialog,
+                            expiresInMinutes: preset.minutes,
+                          })
+                        }
+                      >
+                        {preset.label}
+                      </Button>
+                    ))}
+                  </div>
                   <input
-                    type="number"
-                    min={1}
-                    max={10080}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     value={linkDialog.expiresInMinutes}
                     onChange={(event) =>
                       setLinkDialog({
                         ...linkDialog,
-                        expiresInMinutes: Number.isFinite(
-                          Number(event.target.value),
-                        )
-                          ? Number(event.target.value)
-                          : 0,
+                        expiresInMinutes: event.target.value.replace(
+                          /\D/g,
+                          "",
+                        ),
                       })
                     }
+                    placeholder="60"
                     className="h-9 rounded-lg border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
                   />
                 </label>
@@ -572,9 +767,9 @@ export function FilesManager() {
                     onClick={() => void generateDownloadLink()}
                     disabled={
                       linkDialog.isGenerating ||
-                      !Number.isFinite(linkDialog.expiresInMinutes) ||
-                      linkDialog.expiresInMinutes < 1 ||
-                      linkDialog.expiresInMinutes > 10080
+                      !Number.isFinite(Number(linkDialog.expiresInMinutes)) ||
+                      Number(linkDialog.expiresInMinutes) < 1 ||
+                      Number(linkDialog.expiresInMinutes) > 10080
                     }
                   >
                     {linkDialog.isGenerating ? (
@@ -611,9 +806,13 @@ export function FilesManager() {
             </AlertDialog.Description>
 
             {deleteDialog && (
-              <p className="mt-3 truncate rounded-md bg-muted px-3 py-2 text-sm">
-                {deleteDialog.file.fileName}
-              </p>
+              <div className="mt-3 max-h-40 overflow-y-auto rounded-md bg-muted px-3 py-2 text-sm">
+                {deleteDialog.files.map((file) => (
+                  <p key={file.key} className="truncate">
+                    {file.fileName}
+                  </p>
+                ))}
+              </div>
             )}
 
             <div className="mt-5 flex justify-end gap-2">
@@ -627,7 +826,7 @@ export function FilesManager() {
                   variant="destructive"
                   onClick={(event) => {
                     event.preventDefault();
-                    void deleteFile();
+                    void deleteFiles();
                   }}
                   disabled={deleteDialog?.isDeleting}
                 >

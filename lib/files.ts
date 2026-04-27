@@ -24,3 +24,15 @@ export function displayFileName(key: string) {
     "",
   );
 }
+
+export function normalizeUploadedFileName(fileName: string) {
+  return fileName.replace(/\.app\.zip$/i, ".app");
+}
+
+export function normalizeUploadedContentType(fileName: string, contentType: string) {
+  if (/\.app\.zip$/i.test(fileName)) {
+    return "application/octet-stream";
+  }
+
+  return contentType || "application/octet-stream";
+}
