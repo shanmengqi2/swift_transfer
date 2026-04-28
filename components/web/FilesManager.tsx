@@ -473,7 +473,7 @@ export function FilesManager() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] table-fixed text-sm">
+            <table className="w-full min-w-245 table-fixed text-sm">
               <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
                 <tr className="border-b">
                   <th className="w-12 px-4 py-3 font-medium">
@@ -584,7 +584,9 @@ export function FilesManager() {
                                 expired && "text-destructive",
                               )}
                             >
-                              <div>{formatDate(file.presignedUrlExpiresAt)}</div>
+                              <div>
+                                {formatDate(file.presignedUrlExpiresAt)}
+                              </div>
                               {expired && (
                                 <div className="text-xs">Expired</div>
                               )}
@@ -718,10 +720,7 @@ export function FilesManager() {
                     onChange={(event) =>
                       setLinkDialog({
                         ...linkDialog,
-                        expiresInMinutes: event.target.value.replace(
-                          /\D/g,
-                          "",
-                        ),
+                        expiresInMinutes: event.target.value.replace(/\D/g, ""),
                       })
                     }
                     placeholder="60"
@@ -754,7 +753,8 @@ export function FilesManager() {
                       className="min-h-24 resize-none rounded-lg border bg-background p-3 text-xs outline-none"
                     />
                     <p className="text-xs text-muted-foreground">
-                      Expires {formatDate(linkDialog.file.presignedUrlExpiresAt)}
+                      Expires{" "}
+                      {formatDate(linkDialog.file.presignedUrlExpiresAt)}
                     </p>
                   </div>
                 )}
