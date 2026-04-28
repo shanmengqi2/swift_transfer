@@ -67,10 +67,16 @@ SWIFT_TRANSFER_DB_PATH=/app/.data/swift-transfer.sqlite
 
 ## 创建登录用户
 
-在项目目录中生成用户密码 hash：
+如果已经有项目代码，可以在项目目录中生成用户密码 hash：
 
 ```bash
 pnpm auth:hash <username> <password>
+```
+
+如果只使用 Docker 镜像部署，不想拉取 repo 或单独下载脚本文件，也可以直接用镜像生成同样格式的用户信息：
+
+```bash
+docker run --rm shanmengqi/swift_transfer:latest node scripts/hash-password.mjs <username> <password>
 ```
 
 命令会输出类似：
