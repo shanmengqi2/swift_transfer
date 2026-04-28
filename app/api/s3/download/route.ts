@@ -5,7 +5,7 @@ import { z } from "zod";
 import { authenticateRequest } from "@/lib/auth/guards";
 import { getBucketName } from "@/lib/files";
 import { getPresignedLink, savePresignedLink } from "@/lib/presignedLinks";
-import { S3 } from "@/lib/s3Client";
+import { getS3Client } from "@/lib/s3Client";
 
 export const runtime = "nodejs";
 
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
       createdAt.getTime() + expiresInSeconds * 1000,
     ).toISOString();
     const url = await getSignedUrl(
-      S3,
+      getS3Client(),
       new GetObjectCommand({
         Bucket: bucket,
         Key: key,
