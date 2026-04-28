@@ -1,13 +1,19 @@
 import { ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { NextResponse } from "next/server";
+import { authenticateRequest } from "@/lib/auth/guards";
 import { displayFileName, getBucketName, type ManagedFile } from "@/lib/files";
 import { listPresignedLinks } from "@/lib/presignedLinks";
 import { S3 } from "@/lib/s3Client";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const auth = await authenticateRequest(request);
+    if (auth.response) {
+      return auth.response;
+    }
+
     const bucket = getBucketName();
     const objects = [];
     let continuationToken: string | undefined;

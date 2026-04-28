@@ -8,6 +8,7 @@ import {
   normalizeUploadedContentType,
   normalizeUploadedFileName,
 } from "@/lib/files";
+import { authenticateRequest } from "@/lib/auth/guards";
 import { S3 } from "@/lib/s3Client";
 
 export const runtime = "nodejs";
@@ -52,6 +53,11 @@ const uploadRequestSchema = z.object({
 
 export async function POST(request: Request) {
   try {
+    const auth = await authenticateRequest(request);
+    if (auth.response) {
+      return auth.response;
+    }
+
     const body = await request.json();
 
     const validation = uploadRequestSchema.safeParse(body);

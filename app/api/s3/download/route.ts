@@ -2,6 +2,7 @@ import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { authenticateRequest } from "@/lib/auth/guards";
 import { getBucketName } from "@/lib/files";
 import { getPresignedLink, savePresignedLink } from "@/lib/presignedLinks";
 import { S3 } from "@/lib/s3Client";
@@ -15,6 +16,11 @@ const downloadRequestSchema = z.object({
 
 export async function POST(request: Request) {
   try {
+    const auth = await authenticateRequest(request);
+    if (auth.response) {
+      return auth.response;
+    }
+
     const body = await request.json();
     const validation = downloadRequestSchema.safeParse(body);
 
@@ -59,6 +65,11 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
+  const auth = await authenticateRequest(request);
+  if (auth.response) {
+    return auth.response;
+  }
+
   const url = new URL(request.url);
   const key = url.searchParams.get("key");
 
