@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/auth/guards";
 import { displayFileName, getBucketName, type ManagedFile } from "@/lib/files";
 import { listPresignedLinks } from "@/lib/presignedLinks";
-import { S3 } from "@/lib/s3Client";
+import { getS3Client } from "@/lib/s3Client";
 
 export const runtime = "nodejs";
 
@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     let continuationToken: string | undefined;
 
     do {
-      const response = await S3.send(
+      const response = await getS3Client().send(
         new ListObjectsV2Command({
           Bucket: bucket,
           ContinuationToken: continuationToken,

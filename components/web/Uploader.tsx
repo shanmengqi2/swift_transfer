@@ -11,13 +11,8 @@ import type { FileRejection } from "react-dropzone";
 import { toast } from "sonner";
 import { v4 as uuidv4 } from "uuid";
 import { FileIcon, Loader2, Trash2, X } from "lucide-react";
+import type { UploadLimits } from "@/lib/uploadLimits";
 
-const MAX_FILES = parseInt(process.env.NEXT_PUBLIC_MAX_FILES ?? "10", 10);
-const MAX_FILE_SIZE_MB = parseInt(
-  process.env.NEXT_PUBLIC_MAX_FILE_SIZE_MB ?? "50",
-  10,
-);
-const MAX_FILE_SIZE = 1024 * 1024 * MAX_FILE_SIZE_MB;
 const FILE_PLACEHOLDER_SRC = "/File.png";
 
 function displayUploadFileName(fileName: string) {
@@ -49,6 +44,10 @@ type Confirmation =
   | { type: "delete"; fileId: string }
   | { type: "cancel"; fileId: string };
 
+type UploaderProps = {
+  limits: UploadLimits;
+};
+
 function getRejectionErrorCodes(fileRejections: FileRejection[]) {
   return new Set(
     fileRejections.flatMap((fileRejection) =>
@@ -57,10 +56,11 @@ function getRejectionErrorCodes(fileRejections: FileRejection[]) {
   );
 }
 
-export function Uploader() {
+export function Uploader({ limits }: UploaderProps) {
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const uploadJobsRef = useRef(new Map<string, UploadJob>());
+  const { maxFiles, maxFileSizeMb, maxFileSizeBytes } = limits;
 
   const clearProgressTimer = (job?: UploadJob) => {
     if (job?.progressTimer) {
@@ -307,12 +307,12 @@ export function Uploader() {
       const droppedFileCount = acceptedFiles.length + fileRejections.length;
       const errorCodes = getRejectionErrorCodes(fileRejections);
 
-      if (droppedFileCount > MAX_FILES || errorCodes.has("too-many-files")) {
-        toast.error(`You can only upload up to ${MAX_FILES} files.`);
+      if (droppedFileCount > maxFiles || errorCodes.has("too-many-files")) {
+        toast.error(`You can only upload up to ${maxFiles} files.`);
       }
 
       if (errorCodes.has("file-too-large")) {
-        toast.error(`Each file must be less than ${MAX_FILE_SIZE_MB}MB.`);
+        toast.error(`Each file must be less than ${maxFileSizeMb}MB.`);
       }
 
       if (acceptedFiles.length > 0) {
@@ -336,7 +336,7 @@ export function Uploader() {
         uploads.forEach((upload) => uploadFile(upload, droppedFileCount));
       }
     },
-    [uploadFile],
+    [maxFileSizeMb, maxFiles, uploadFile],
   );
   const onDropRejected = useCallback((fileRejections: FileRejection[]) => {
     console.log("rejected:", fileRejections);
@@ -344,8 +344,8 @@ export function Uploader() {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     onDropRejected,
-    maxFiles: MAX_FILES,
-    maxSize: MAX_FILE_SIZE,
+    maxFiles,
+    maxSize: maxFileSizeBytes,
   });
 
   const confirmationFile = confirmation
@@ -356,7 +356,7 @@ export function Uploader() {
   return (
     <>
       {/*<p>
-        {MAX_FILES}, {MAX_FILE_SIZE_MB}
+        {maxFiles}, {maxFileSizeMb}
       </p>*/}
       <Card
         {...getRootProps()}

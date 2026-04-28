@@ -9,40 +9,10 @@ import {
   normalizeUploadedFileName,
 } from "@/lib/files";
 import { authenticateRequest } from "@/lib/auth/guards";
-import { S3 } from "@/lib/s3Client";
+import { getS3Client } from "@/lib/s3Client";
+import { getUploadLimits } from "@/lib/uploadLimits";
 
 export const runtime = "nodejs";
-
-const DEFAULT_MAX_FILES = 10;
-const DEFAULT_MAX_FILE_SIZE_MB = 50;
-const BYTES_PER_MB = 1024 * 1024;
-
-function getPositiveIntegerEnv(name: string, fallback: number) {
-  const value = process.env[name];
-  if (!value) {
-    return fallback;
-  }
-
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function getUploadLimits() {
-  const maxFiles = getPositiveIntegerEnv(
-    "NEXT_PUBLIC_MAX_FILES",
-    DEFAULT_MAX_FILES,
-  );
-  const maxFileSizeMb = getPositiveIntegerEnv(
-    "NEXT_PUBLIC_MAX_FILE_SIZE_MB",
-    DEFAULT_MAX_FILE_SIZE_MB,
-  );
-
-  return {
-    maxFiles,
-    maxFileSizeMb,
-    maxFileSizeBytes: maxFileSizeMb * BYTES_PER_MB,
-  };
-}
 
 const uploadRequestSchema = z.object({
   fileName: z.string().min(1),
@@ -98,7 +68,9 @@ export async function POST(request: Request) {
       ContentType: resolvedContentType,
       ContentLength: size,
     });
-    const presignedUrl = await getSignedUrl(S3, command, { expiresIn: 3600 });
+    const presignedUrl = await getSignedUrl(getS3Client(), command, {
+      expiresIn: 3600,
+    });
     // return NextResponse.json({ presignedUrl });
     const response = {
       presignedUrl,

@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/auth/guards";
 import { getBucketName } from "@/lib/files";
 import { deletePresignedLink } from "@/lib/presignedLinks";
-import { S3 } from "@/lib/s3Client";
+import { getS3Client } from "@/lib/s3Client";
 
 export const runtime = "nodejs";
 
@@ -28,7 +28,7 @@ export async function DELETE(request: Request) {
       Key: key,
     });
 
-    await S3.send(command);
+    await getS3Client().send(command);
     deletePresignedLink(key);
 
     return NextResponse.json(
