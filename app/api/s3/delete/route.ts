@@ -1,5 +1,6 @@
 import { DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { NextResponse } from "next/server";
+import { authenticateRequest } from "@/lib/auth/guards";
 import { getBucketName } from "@/lib/files";
 import { deletePresignedLink } from "@/lib/presignedLinks";
 import { S3 } from "@/lib/s3Client";
@@ -8,6 +9,11 @@ export const runtime = "nodejs";
 
 export async function DELETE(request: Request) {
   try {
+    const auth = await authenticateRequest(request);
+    if (auth.response) {
+      return auth.response;
+    }
+
     const body = await request.json();
     const key = body.key;
 

@@ -2,6 +2,21 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+Create an authorized user hash:
+
+```bash
+pnpm auth:hash <username> <password>
+```
+
+Add the output to `.env` with a strong session secret:
+
+```bash
+AUTH_SECRET="replace-with-at-least-32-random-characters"
+AUTH_USERS="alice:scrypt:v1:..."
+```
+
+Multiple users can be comma-separated in `AUTH_USERS`.
+
 First, run the development server:
 
 ```bash
