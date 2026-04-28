@@ -12,10 +12,17 @@ import { toast } from "sonner";
 import { v4 as uuidv4 } from "uuid";
 import { FileIcon, Loader2, Trash2, X } from "lucide-react";
 
-const MAX_FILES = 5;
-const MAX_FILE_SIZE_MB = 50;
+const MAX_FILES = parseInt(process.env.NEXT_PUBLIC_MAX_FILES ?? "10", 10);
+const MAX_FILE_SIZE_MB = parseInt(
+  process.env.NEXT_PUBLIC_MAX_FILE_SIZE_MB ?? "50",
+  10,
+);
 const MAX_FILE_SIZE = 1024 * 1024 * MAX_FILE_SIZE_MB;
 const FILE_PLACEHOLDER_SRC = "/File.png";
+
+function displayUploadFileName(fileName: string) {
+  return fileName.replace(/\.app\.zip$/i, ".app");
+}
 
 type UploadFile = {
   id: string;
@@ -133,7 +140,7 @@ export function Uploader() {
   }, []);
 
   const uploadFile = useCallback(
-    async (upload: UploadFile) => {
+    async (upload: UploadFile, batchFileCount: number) => {
       const { id: fileId, file } = upload;
       const presignController = new AbortController();
       const job: UploadJob = { presignController, abortRequested: false };
@@ -156,6 +163,7 @@ export function Uploader() {
             fileName: file.name,
             contentType: file.type || "application/octet-stream",
             size: file.size,
+            batchFileCount,
           }),
         });
 
@@ -164,7 +172,10 @@ export function Uploader() {
         }
 
         if (!presignedUrlResponse.ok) {
-          toast.error("failed to get Presigned Url");
+          const responseBody = await presignedUrlResponse
+            .json()
+            .catch(() => null);
+          toast.error(responseBody?.error ?? "failed to get Presigned Url");
           setFiles((prevFiles) =>
             prevFiles.map((f) =>
               f.id === fileId
@@ -322,7 +333,7 @@ export function Uploader() {
         });
 
         setFiles((prevFiles) => [...prevFiles, ...uploads]);
-        uploads.forEach(uploadFile);
+        uploads.forEach((upload) => uploadFile(upload, droppedFileCount));
       }
     },
     [uploadFile],
@@ -344,6 +355,9 @@ export function Uploader() {
 
   return (
     <>
+      {/*<p>
+        {MAX_FILES}, {MAX_FILE_SIZE_MB}
+      </p>*/}
       <Card
         {...getRootProps()}
         className={cn(
@@ -422,7 +436,7 @@ export function Uploader() {
             </div>
 
             <p className="text-sm text-muted-foreground truncate">
-              {file.file.name}
+              {displayUploadFileName(file.file.name)}
             </p>
             {!file.isImage && (
               <div className="flex items-center gap-1 text-xs text-muted-foreground">
