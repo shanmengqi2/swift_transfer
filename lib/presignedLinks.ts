@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -22,14 +23,20 @@ type StoredPresignedLinkRow = {
 
 let database: DatabaseSync | undefined;
 
+function getDefaultDatabasePath() {
+  if (process.env.VERCEL) {
+    return path.join(tmpdir(), "swift-transfer.sqlite");
+  }
+
+  return path.join(process.cwd(), ".data", "swift-transfer.sqlite");
+}
+
 function getDatabase() {
   if (database) {
     return database;
   }
 
-  const dbPath =
-    process.env.SWIFT_TRANSFER_DB_PATH ??
-    path.join(process.cwd(), ".data", "swift-transfer.sqlite");
+  const dbPath = process.env.SWIFT_TRANSFER_DB_PATH ?? getDefaultDatabasePath();
   mkdirSync(path.dirname(dbPath), { recursive: true });
 
   database = new DatabaseSync(dbPath);
