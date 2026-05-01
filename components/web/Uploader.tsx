@@ -36,7 +36,6 @@ type UploadJob = {
   xhr?: XMLHttpRequest;
   presignController?: AbortController;
   key?: string;
-  progressTimer?: number;
   abortRequested: boolean;
 };
 
@@ -61,13 +60,6 @@ export function Uploader({ limits }: UploaderProps) {
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const uploadJobsRef = useRef(new Map<string, UploadJob>());
   const { maxFiles, maxFileSizeMb, maxFileSizeBytes } = limits;
-
-  const clearProgressTimer = (job?: UploadJob) => {
-    if (job?.progressTimer) {
-      window.clearInterval(job.progressTimer);
-      job.progressTimer = undefined;
-    }
-  };
 
   const revokeObjectUrl = (file?: UploadFile) => {
     if (file?.objectUrl) {
@@ -127,7 +119,6 @@ export function Uploader({ limits }: UploaderProps) {
     const job = uploadJobsRef.current.get(fileId);
     if (job) {
       job.abortRequested = true;
-      clearProgressTimer(job);
       job.presignController?.abort();
       job.xhr?.abort();
     }
@@ -149,7 +140,7 @@ export function Uploader({ limits }: UploaderProps) {
       setFiles((prevFiles) =>
         prevFiles.map((f) =>
           f.id === fileId
-            ? { ...f, uploading: true, progress: 1, error: false }
+            ? { ...f, uploading: true, progress: 0, error: false }
             : f,
         ),
       );
@@ -192,7 +183,7 @@ export function Uploader({ limits }: UploaderProps) {
         setFiles((prevFiles) =>
           prevFiles.map((f) =>
             f.id === fileId
-              ? { ...f, key: uniqueKey, progress: Math.max(f.progress, 5) }
+              ? { ...f, key: uniqueKey, progress: 0 }
               : f,
           ),
         );
@@ -200,29 +191,20 @@ export function Uploader({ limits }: UploaderProps) {
         await new Promise<void>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           job.xhr = xhr;
-          job.progressTimer = window.setInterval(() => {
-            setFiles((prevFiles) =>
-              prevFiles.map((f) =>
-                f.id === fileId && f.uploading && !f.isCancelling
-                  ? { ...f, progress: Math.min(f.progress + 1, 92) }
-                  : f,
-              ),
-            );
-          }, 350);
 
           xhr.upload.onprogress = (event) => {
-            const totalBytes = event.lengthComputable ? event.total : file.size;
+            const totalBytes =
+              event.lengthComputable && event.total > 0
+                ? event.total
+                : file.size;
             if (!totalBytes) {
               return;
             }
 
-            const percentageCompleted = Math.round(
+            const percentageCompleted = Math.floor(
               (event.loaded / totalBytes) * 100,
             );
-            const displayProgress = Math.min(
-              99,
-              Math.max(5, percentageCompleted),
-            );
+            const displayProgress = Math.min(99, percentageCompleted);
 
             setFiles((prevFiles) =>
               prevFiles.map((f) =>
@@ -233,7 +215,6 @@ export function Uploader({ limits }: UploaderProps) {
             );
           };
           xhr.onload = () => {
-            clearProgressTimer(job);
             if (xhr.status === 200 || xhr.status === 204) {
               setFiles((prevFiles) =>
                 prevFiles.map((f) =>
@@ -250,11 +231,9 @@ export function Uploader({ limits }: UploaderProps) {
             }
           };
           xhr.onerror = () => {
-            clearProgressTimer(job);
             reject(new Error("Upload failed"));
           };
           xhr.onabort = () => {
-            clearProgressTimer(job);
             reject(new DOMException("Upload aborted", "AbortError"));
           };
 
@@ -266,7 +245,6 @@ export function Uploader({ limits }: UploaderProps) {
           xhr.send(file);
         });
       } catch (error) {
-        clearProgressTimer(job);
         if (
           job.abortRequested ||
           (error as DOMException).name === "AbortError"
@@ -293,7 +271,6 @@ export function Uploader({ limits }: UploaderProps) {
           ),
         );
       } finally {
-        clearProgressTimer(job);
         if (!job.abortRequested) {
           uploadJobsRef.current.delete(fileId);
         }
