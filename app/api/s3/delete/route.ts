@@ -29,7 +29,7 @@ export async function DELETE(request: Request) {
     });
 
     await getS3Client().send(command);
-    deletePresignedLink(key);
+    await deletePresignedLink(key);
 
     return NextResponse.json(
       { message: "Object deleted successfully" },

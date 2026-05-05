@@ -33,7 +33,7 @@ export async function GET(request: Request) {
     const keys = objects
       .map((object) => object.Key)
       .filter((key): key is string => Boolean(key));
-    const links = listPresignedLinks(keys);
+    const links = await listPresignedLinks(keys);
 
     const files: ManagedFile[] = objects
       .filter((object) => Boolean(object.Key))

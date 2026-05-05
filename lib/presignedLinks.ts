@@ -1,7 +1,4 @@
-import { mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 
 type StoredPresignedLink = {
   key: string;
@@ -21,37 +18,45 @@ type StoredPresignedLinkRow = {
   created_at: string;
 };
 
-let database: DatabaseSync | undefined;
+let sql: NeonQueryFunction<false, false> | undefined;
+let initialization: Promise<void> | undefined;
 
-function getDefaultDatabasePath() {
-  if (process.env.VERCEL) {
-    return path.join(tmpdir(), "swift-transfer.sqlite");
+function getSql() {
+  if (sql) {
+    return sql;
   }
 
-  return path.join(process.cwd(), ".data", "swift-transfer.sqlite");
+  const connectionString = process.env.POSTGRES_URL;
+  if (!connectionString) {
+    throw new Error("Missing POSTGRES_URL");
+  }
+
+  sql = neon(connectionString);
+
+  return sql;
 }
 
-function getDatabase() {
-  if (database) {
-    return database;
+async function ensureSchema() {
+  if (!initialization) {
+    initialization = getSql()
+      .query(`
+        CREATE TABLE IF NOT EXISTS presigned_links (
+          "key" TEXT PRIMARY KEY,
+          bucket TEXT NOT NULL,
+          url TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          expires_in_seconds INTEGER NOT NULL,
+          created_at TEXT NOT NULL
+        );
+      `)
+      .then(() => undefined)
+      .catch((error) => {
+        initialization = undefined;
+        throw error;
+      });
   }
 
-  const dbPath = process.env.SWIFT_TRANSFER_DB_PATH ?? getDefaultDatabasePath();
-  mkdirSync(path.dirname(dbPath), { recursive: true });
-
-  database = new DatabaseSync(dbPath);
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS presigned_links (
-      key TEXT PRIMARY KEY,
-      bucket TEXT NOT NULL,
-      url TEXT NOT NULL,
-      expires_at TEXT NOT NULL,
-      expires_in_seconds INTEGER NOT NULL,
-      created_at TEXT NOT NULL
-    );
-  `);
-
-  return database;
+  await initialization;
 }
 
 function mapRow(row: StoredPresignedLinkRow): StoredPresignedLink {
@@ -65,64 +70,71 @@ function mapRow(row: StoredPresignedLinkRow): StoredPresignedLink {
   };
 }
 
-export function getPresignedLink(key: string) {
-  const row = getDatabase()
-    .prepare("SELECT * FROM presigned_links WHERE key = ?")
-    .get(key) as StoredPresignedLinkRow | undefined;
+export async function getPresignedLink(key: string) {
+  await ensureSchema();
+
+  const rows = (await getSql().query(
+    'SELECT * FROM presigned_links WHERE "key" = $1',
+    [key],
+  )) as StoredPresignedLinkRow[];
+  const row = rows[0];
 
   return row ? mapRow(row) : null;
 }
 
-export function listPresignedLinks(keys: string[]) {
+export async function listPresignedLinks(keys: string[]) {
   if (keys.length === 0) {
     return new Map<string, StoredPresignedLink>();
   }
 
-  const links = new Map<string, StoredPresignedLink>();
-  const statement = getDatabase().prepare(
-    "SELECT * FROM presigned_links WHERE key = ?",
-  );
+  await ensureSchema();
 
-  for (const key of keys) {
-    const row = statement.get(key) as StoredPresignedLinkRow | undefined;
-    if (row) {
-      links.set(key, mapRow(row));
-    }
+  const links = new Map<string, StoredPresignedLink>();
+  const rows = (await getSql().query(
+    'SELECT * FROM presigned_links WHERE "key" = ANY($1::text[])',
+    [keys],
+  )) as StoredPresignedLinkRow[];
+
+  for (const row of rows) {
+    links.set(row.key, mapRow(row));
   }
 
   return links;
 }
 
-export function savePresignedLink(link: StoredPresignedLink) {
-  getDatabase()
-    .prepare(
-      `
+export async function savePresignedLink(link: StoredPresignedLink) {
+  await ensureSchema();
+
+  await getSql().query(
+    `
       INSERT INTO presigned_links (
-        key,
+        "key",
         bucket,
         url,
         expires_at,
         expires_in_seconds,
         created_at
-      ) VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(key) DO UPDATE SET
+      ) VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT("key") DO UPDATE SET
         bucket = excluded.bucket,
         url = excluded.url,
         expires_at = excluded.expires_at,
         expires_in_seconds = excluded.expires_in_seconds,
         created_at = excluded.created_at
     `,
-    )
-    .run(
+    [
       link.key,
       link.bucket,
       link.url,
       link.expiresAt,
       link.expiresInSeconds,
       link.createdAt,
-    );
+    ],
+  );
 }
 
-export function deletePresignedLink(key: string) {
-  getDatabase().prepare("DELETE FROM presigned_links WHERE key = ?").run(key);
+export async function deletePresignedLink(key: string) {
+  await ensureSchema();
+
+  await getSql().query('DELETE FROM presigned_links WHERE "key" = $1', [key]);
 }

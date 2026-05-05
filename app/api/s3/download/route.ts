@@ -52,7 +52,7 @@ export async function POST(request: Request) {
       createdAt: createdAt.toISOString(),
     };
 
-    savePresignedLink(link);
+    await savePresignedLink(link);
 
     return NextResponse.json({ link }, { status: 200 });
   } catch (error) {
@@ -77,5 +77,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Key is required" }, { status: 400 });
   }
 
-  return NextResponse.json({ link: getPresignedLink(key) }, { status: 200 });
+  return NextResponse.json(
+    { link: await getPresignedLink(key) },
+    { status: 200 },
+  );
 }
