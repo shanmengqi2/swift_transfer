@@ -1,0 +1,104 @@
+import { HeadObjectCommand, S3ServiceException } from "@aws-sdk/client-s3";
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { ensureSevenDayDownloadLink } from "@/lib/downloadLinks";
+import { getBucketName } from "@/lib/files";
+import {
+  getPickupShareByCode,
+  isPickupCodeExpired,
+  type PickupFileLink,
+} from "@/lib/pickupCodes";
+import { getS3Client } from "@/lib/s3Client";
+
+export const runtime = "nodejs";
+
+const resolvePickupSchema = z.object({
+  code: z.string().trim().min(6).max(6),
+});
+
+async function objectExists(bucket: string, key: string) {
+  try {
+    await getS3Client().send(
+      new HeadObjectCommand({
+        Bucket: bucket,
+        Key: key,
+      }),
+    );
+
+    return true;
+  } catch (error) {
+    if (
+      error instanceof S3ServiceException &&
+      (error.name === "NotFound" || error.$metadata.httpStatusCode === 404)
+    ) {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const validation = resolvePickupSchema.safeParse(body);
+
+    if (!validation.success) {
+      return NextResponse.json({ error: "Invalid pickup code" }, { status: 400 });
+    }
+
+    const pickupShare = await getPickupShareByCode(validation.data.code);
+
+    if (!pickupShare || isPickupCodeExpired(pickupShare.expiresAt)) {
+      return NextResponse.json(
+        { error: "Pickup code is invalid or expired" },
+        { status: 404 },
+      );
+    }
+
+    const defaultBucket = getBucketName();
+    const files: PickupFileLink[] = await Promise.all(
+      pickupShare.files.map(async (file) => {
+        const bucket = file.bucket || defaultBucket;
+        const exists = await objectExists(bucket, file.key);
+
+        if (!exists) {
+          return {
+            ...file,
+            bucket,
+            exists: false,
+            downloadUrl: null,
+            downloadUrlExpiresAt: null,
+          };
+        }
+
+        const link = await ensureSevenDayDownloadLink(file.key);
+
+        return {
+          ...file,
+          bucket,
+          exists: true,
+          downloadUrl: link.url,
+          downloadUrlExpiresAt: link.expiresAt,
+        };
+      }),
+    );
+
+    return NextResponse.json(
+      {
+        pickup: {
+          code: pickupShare.code,
+          expiresAt: pickupShare.expiresAt,
+          files,
+        },
+      },
+      { status: 200 },
+    );
+  } catch (error) {
+    console.error(error);
+    return NextResponse.json(
+      { error: "Failed to resolve pickup code" },
+      { status: 500 },
+    );
+  }
+}

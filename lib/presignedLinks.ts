@@ -1,4 +1,4 @@
-import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
+import { getSql } from "@/lib/postgres";
 
 type StoredPresignedLink = {
   key: string;
@@ -18,23 +18,7 @@ type StoredPresignedLinkRow = {
   created_at: string;
 };
 
-let sql: NeonQueryFunction<false, false> | undefined;
 let initialization: Promise<void> | undefined;
-
-function getSql() {
-  if (sql) {
-    return sql;
-  }
-
-  const connectionString = process.env.POSTGRES_URL;
-  if (!connectionString) {
-    throw new Error("Missing POSTGRES_URL");
-  }
-
-  sql = neon(connectionString);
-
-  return sql;
-}
 
 async function ensureSchema() {
   if (!initialization) {

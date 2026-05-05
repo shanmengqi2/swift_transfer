@@ -6,8 +6,10 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  AlertTriangle,
   Copy,
   Download,
+  KeyRound,
   Loader2,
   MoreHorizontal,
   RefreshCw,
@@ -47,6 +49,17 @@ type DeleteDialogState = {
   isDeleting: boolean;
 };
 
+type PickupDialogState = {
+  files: ManagedFile[];
+  expiresInMinutes: string;
+  neverExpires: boolean;
+  isCreating: boolean;
+  pickupCode: {
+    code: string;
+    expiresAt: string | null;
+  } | null;
+};
+
 type DownloadLink = {
   url: string;
   expiresAt: string;
@@ -62,6 +75,12 @@ const EXPIRY_PRESETS: ExpiryPreset[] = [
   { label: "1 hour", minutes: "60" },
   { label: "1 day", minutes: "1440" },
   { label: "7 days", minutes: "10080" },
+];
+
+const PICKUP_EXPIRY_PRESETS: ExpiryPreset[] = [
+  { label: "1 day", minutes: "1440" },
+  { label: "7 days", minutes: "10080" },
+  { label: "30 days", minutes: "43200" },
 ];
 
 function formatBytes(bytes: number) {
@@ -127,6 +146,9 @@ export function FilesManager() {
     direction: "desc",
   });
   const [linkDialog, setLinkDialog] = useState<LinkDialogState | null>(null);
+  const [pickupDialog, setPickupDialog] = useState<PickupDialogState | null>(
+    null,
+  );
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(
     null,
   );
@@ -245,6 +267,16 @@ export function FilesManager() {
     });
   };
 
+  const openPickupDialog = () => {
+    setPickupDialog({
+      files: selectedFiles,
+      expiresInMinutes: "10080",
+      neverExpires: false,
+      isCreating: false,
+      pickupCode: null,
+    });
+  };
+
   const toggleFileSelection = (key: string) => {
     setSelectedKeys((currentKeys) => {
       const nextKeys = new Set(currentKeys);
@@ -331,6 +363,73 @@ export function FilesManager() {
     }
   };
 
+  const createPickupCode = async () => {
+    if (!pickupDialog) {
+      return;
+    }
+
+    const expiresInMinutes = Number(pickupDialog.expiresInMinutes);
+    if (
+      !pickupDialog.neverExpires &&
+      (!Number.isFinite(expiresInMinutes) || expiresInMinutes < 1)
+    ) {
+      toast.error("Valid time must be at least 1 minute");
+      return;
+    }
+
+    setPickupDialog({ ...pickupDialog, isCreating: true });
+
+    try {
+      const response = await fetch("/api/pickup-codes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          files: pickupDialog.files.map((file) => ({
+            key: file.key,
+            bucket: file.bucket,
+            fileName: file.fileName,
+            size: file.size,
+          })),
+          expiresInMinutes: pickupDialog.neverExpires
+            ? null
+            : expiresInMinutes,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to create pickup code");
+      }
+
+      const data = (await response.json()) as {
+        pickupCode: {
+          code: string;
+          expiresAt: string | null;
+        };
+      };
+      setFiles((currentFiles) =>
+        currentFiles.map((file) =>
+          selectedKeys.has(file.key)
+            ? {
+                ...file,
+                pickupCodeCount: (file.pickupCodeCount ?? 0) + 1,
+              }
+            : file,
+        ),
+      );
+      setPickupDialog({
+        ...pickupDialog,
+        isCreating: false,
+        pickupCode: data.pickupCode,
+      });
+      toast.success("Pickup code created");
+    } catch {
+      toast.error("Failed to create pickup code");
+      setPickupDialog((currentDialog) =>
+        currentDialog ? { ...currentDialog, isCreating: false } : null,
+      );
+    }
+  };
+
   const deleteFiles = async () => {
     if (!deleteDialog) {
       return;
@@ -408,18 +507,24 @@ export function FilesManager() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {selectedFiles.length > 0 && (
-                <Button
-                  variant="destructive"
-                  onClick={() =>
-                    setDeleteDialog({
-                      files: selectedFiles,
-                      isDeleting: false,
-                    })
-                  }
-                >
-                  <Trash2 className="size-4" />
-                  Delete selected
-                </Button>
+                <>
+                  <Button onClick={openPickupDialog}>
+                    <KeyRound className="size-4" />
+                    Create pickup code
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() =>
+                      setDeleteDialog({
+                        files: selectedFiles,
+                        isDeleting: false,
+                      })
+                    }
+                  >
+                    <Trash2 className="size-4" />
+                    Delete selected
+                  </Button>
+                </>
               )}
               <Button
                 variant="outline"
@@ -569,6 +674,13 @@ export function FilesManager() {
                           <div className="truncate text-xs text-muted-foreground">
                             {file.key}
                           </div>
+                          {(file.pickupCodeCount ?? 0) > 0 && (
+                            <div className="mt-1 inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                              <KeyRound className="size-3" />
+                              Shared by {file.pickupCodeCount} pickup code
+                              {file.pickupCodeCount === 1 ? "" : "s"}
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-3 tabular-nums text-muted-foreground">
                           {formatBytes(file.size)}
@@ -786,6 +898,171 @@ export function FilesManager() {
         </Dialog.Portal>
       </Dialog.Root>
 
+      <Dialog.Root
+        open={Boolean(pickupDialog)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPickupDialog(null);
+          }
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-50 bg-black/45" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-5 shadow-lg">
+            <Dialog.Title className="text-lg font-semibold">
+              Pickup code
+            </Dialog.Title>
+            <Dialog.Description className="mt-2 text-sm text-muted-foreground">
+              Create a 6-character code for the selected files.
+            </Dialog.Description>
+
+            {pickupDialog && (
+              <div className="mt-5 flex flex-col gap-4">
+                <div className="max-h-36 overflow-y-auto rounded-md bg-muted px-3 py-2 text-sm">
+                  {pickupDialog.files.map((file) => (
+                    <p key={file.key} className="truncate">
+                      {file.fileName}
+                    </p>
+                  ))}
+                </div>
+
+                {!pickupDialog.pickupCode ? (
+                  <>
+                    <label className="flex flex-col gap-1 text-sm font-medium">
+                      Valid for minutes
+                      <div className="mb-1 flex flex-wrap gap-2">
+                        {PICKUP_EXPIRY_PRESETS.map((preset) => (
+                          <Button
+                            key={preset.minutes}
+                            type="button"
+                            variant={
+                              !pickupDialog.neverExpires &&
+                              pickupDialog.expiresInMinutes === preset.minutes
+                                ? "default"
+                                : "outline"
+                            }
+                            size="sm"
+                            onClick={() =>
+                              setPickupDialog({
+                                ...pickupDialog,
+                                neverExpires: false,
+                                expiresInMinutes: preset.minutes,
+                              })
+                            }
+                          >
+                            {preset.label}
+                          </Button>
+                        ))}
+                      </div>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={pickupDialog.expiresInMinutes}
+                        onChange={(event) =>
+                          setPickupDialog({
+                            ...pickupDialog,
+                            neverExpires: false,
+                            expiresInMinutes: event.target.value.replace(
+                              /\D/g,
+                              "",
+                            ),
+                          })
+                        }
+                        disabled={pickupDialog.neverExpires}
+                        placeholder="10080"
+                        className="h-9 rounded-lg border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
+                      />
+                    </label>
+
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={pickupDialog.neverExpires}
+                        onChange={(event) =>
+                          setPickupDialog({
+                            ...pickupDialog,
+                            neverExpires: event.target.checked,
+                          })
+                        }
+                        className="size-4 rounded border-border accent-primary"
+                      />
+                      Never expire
+                    </label>
+                  </>
+                ) : (
+                  <div className="flex flex-col gap-3 rounded-md border p-3">
+                    <div>
+                      <p className="text-sm font-medium">Generated code</p>
+                      <p className="mt-1 font-mono text-3xl font-semibold tracking-normal">
+                        {pickupDialog.pickupCode.code}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {pickupDialog.pickupCode.expiresAt
+                          ? `Expires ${formatDate(
+                              pickupDialog.pickupCode.expiresAt,
+                            )}`
+                          : "Never expires"}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          void copyToClipboard(pickupDialog.pickupCode!.code)
+                        }
+                      >
+                        <Copy className="size-4" />
+                        Copy code
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          void copyToClipboard(
+                            `${window.location.origin}/pickup?code=${encodeURIComponent(
+                              pickupDialog.pickupCode!.code,
+                            )}`,
+                          )
+                        }
+                      >
+                        <Copy className="size-4" />
+                        Copy pickup link
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2">
+                  <Dialog.Close asChild>
+                    <Button variant="outline">Close</Button>
+                  </Dialog.Close>
+                  {!pickupDialog.pickupCode && (
+                    <Button
+                      onClick={() => void createPickupCode()}
+                      disabled={
+                        pickupDialog.isCreating ||
+                        (!pickupDialog.neverExpires &&
+                          (!Number.isFinite(
+                            Number(pickupDialog.expiresInMinutes),
+                          ) ||
+                            Number(pickupDialog.expiresInMinutes) < 1))
+                      }
+                    >
+                      {pickupDialog.isCreating ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <KeyRound className="size-4" />
+                      )}
+                      Create code
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
       <AlertDialog.Root
         open={Boolean(deleteDialog)}
         onOpenChange={(open) => {
@@ -806,13 +1083,31 @@ export function FilesManager() {
             </AlertDialog.Description>
 
             {deleteDialog && (
-              <div className="mt-3 max-h-40 overflow-y-auto rounded-md bg-muted px-3 py-2 text-sm">
-                {deleteDialog.files.map((file) => (
-                  <p key={file.key} className="truncate">
-                    {file.fileName}
-                  </p>
-                ))}
-              </div>
+              <>
+                {deleteDialog.files.some(
+                  (file) => (file.pickupCodeCount ?? 0) > 0,
+                ) && (
+                  <div className="mt-3 flex gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                    <p>
+                      Some selected files are included in active pickup codes.
+                      If deleted, pickup visitors will see them as missing.
+                    </p>
+                  </div>
+                )}
+                <div className="mt-3 max-h-40 overflow-y-auto rounded-md bg-muted px-3 py-2 text-sm">
+                  {deleteDialog.files.map((file) => (
+                    <p key={file.key} className="truncate">
+                      {file.fileName}
+                      {(file.pickupCodeCount ?? 0) > 0
+                        ? ` (${file.pickupCodeCount} pickup code${
+                            file.pickupCodeCount === 1 ? "" : "s"
+                          })`
+                        : ""}
+                    </p>
+                  ))}
+                </div>
+              </>
             )}
 
             <div className="mt-5 flex justify-end gap-2">
