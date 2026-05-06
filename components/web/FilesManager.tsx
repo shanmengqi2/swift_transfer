@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertDialog, Dialog } from "radix-ui";
 import {
@@ -7,8 +8,11 @@ import {
   ArrowUp,
   ArrowUpDown,
   AlertTriangle,
+  CheckCircle2,
   Copy,
   Download,
+  ExternalLink,
+  Infinity as InfinityIcon,
   KeyRound,
   Loader2,
   MoreHorizontal,
@@ -16,6 +20,7 @@ import {
   Search,
   Trash2,
   X,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -58,6 +63,22 @@ type PickupDialogState = {
     code: string;
     expiresAt: string | null;
   } | null;
+};
+
+type RelatedPickupCode = {
+  id: string;
+  code: string;
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  revokedAt: string | null;
+  fileCount: number;
+};
+
+type RelatedPickupDialogState = {
+  file: ManagedFile;
+  pickupCodes: RelatedPickupCode[];
+  isLoading: boolean;
 };
 
 type DownloadLink = {
@@ -125,6 +146,38 @@ function isExpired(value: string | null) {
   return value ? new Date(value).getTime() <= Date.now() : false;
 }
 
+function getPickupCodeStatus(pickupCode: RelatedPickupCode) {
+  if (pickupCode.revokedAt) {
+    return {
+      label: "Revoked",
+      icon: XCircle,
+      className: "text-destructive",
+    };
+  }
+
+  if (!pickupCode.expiresAt) {
+    return {
+      label: "Permanent",
+      icon: InfinityIcon,
+      className: "text-foreground",
+    };
+  }
+
+  if (isExpired(pickupCode.expiresAt)) {
+    return {
+      label: "Expired",
+      icon: XCircle,
+      className: "text-destructive",
+    };
+  }
+
+  return {
+    label: "Active",
+    icon: CheckCircle2,
+    className: "text-foreground",
+  };
+}
+
 async function copyToClipboard(text: string) {
   try {
     await navigator.clipboard.writeText(text);
@@ -149,6 +202,8 @@ export function FilesManager() {
   const [pickupDialog, setPickupDialog] = useState<PickupDialogState | null>(
     null,
   );
+  const [relatedPickupDialog, setRelatedPickupDialog] =
+    useState<RelatedPickupDialogState | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(
     null,
   );
@@ -275,6 +330,39 @@ export function FilesManager() {
       isCreating: false,
       pickupCode: null,
     });
+  };
+
+  const openRelatedPickupCodesDialog = async (file: ManagedFile) => {
+    setRelatedPickupDialog({
+      file,
+      pickupCodes: [],
+      isLoading: true,
+    });
+
+    try {
+      const response = await fetch(
+        `/api/pickup-codes/by-file?key=${encodeURIComponent(file.key)}`,
+        { cache: "no-store" },
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to load pickup codes");
+      }
+
+      const data = (await response.json()) as {
+        pickupCodes: RelatedPickupCode[];
+      };
+      setRelatedPickupDialog({
+        file,
+        pickupCodes: data.pickupCodes,
+        isLoading: false,
+      });
+    } catch {
+      toast.error("Failed to load pickup codes");
+      setRelatedPickupDialog((currentDialog) =>
+        currentDialog ? { ...currentDialog, isLoading: false } : null,
+      );
+    }
   };
 
   const toggleFileSelection = (key: string) => {
@@ -722,6 +810,16 @@ export function FilesManager() {
                                 <Download className="size-4" />
                                 Download link
                               </DropdownMenuItem>
+                              {(file.pickupCodeCount ?? 0) > 0 && (
+                                <DropdownMenuItem
+                                  onSelect={() =>
+                                    void openRelatedPickupCodesDialog(file)
+                                  }
+                                >
+                                  <KeyRound className="size-4" />
+                                  View pickup codes
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuItem
                                 variant="destructive"
                                 onSelect={() =>
@@ -1059,6 +1157,118 @@ export function FilesManager() {
                 </div>
               </div>
             )}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      <Dialog.Root
+        open={Boolean(relatedPickupDialog)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRelatedPickupDialog(null);
+          }
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-50 bg-black/45" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-2xl -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border bg-background shadow-lg">
+            <div className="border-b p-5">
+              <Dialog.Title className="text-lg font-semibold">
+                Related pickup codes
+              </Dialog.Title>
+              <Dialog.Description className="mt-2 text-sm text-muted-foreground">
+                Pickup codes that include this file.
+              </Dialog.Description>
+              {relatedPickupDialog && (
+                <div className="mt-3 rounded-md bg-muted px-3 py-2">
+                  <p className="truncate text-sm font-medium">
+                    {relatedPickupDialog.file.fileName}
+                  </p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {relatedPickupDialog.file.key}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="min-h-48 flex-1 overflow-y-auto">
+              {relatedPickupDialog?.isLoading ? (
+                <div className="flex items-center justify-center gap-2 px-4 py-12 text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" />
+                  Loading pickup codes
+                </div>
+              ) : relatedPickupDialog?.pickupCodes.length === 0 ? (
+                <div className="px-4 py-12 text-center text-sm text-muted-foreground">
+                  No pickup codes include this file.
+                </div>
+              ) : (
+                <div className="divide-y">
+                  {relatedPickupDialog?.pickupCodes.map((pickupCode) => {
+                    const status = getPickupCodeStatus(pickupCode);
+                    const StatusIcon = status.icon;
+
+                    return (
+                      <div
+                        key={pickupCode.id}
+                        className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-mono text-sm font-semibold">
+                              {pickupCode.code}
+                            </p>
+                            <span
+                              className={cn(
+                                "inline-flex items-center gap-1 text-xs",
+                                status.className,
+                              )}
+                            >
+                              <StatusIcon className="size-3.5" />
+                              {status.label}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {pickupCode.fileCount} file
+                            {pickupCode.fileCount === 1 ? "" : "s"} · expires{" "}
+                            {pickupCode.expiresAt
+                              ? formatDate(pickupCode.expiresAt)
+                              : "never"}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2 sm:justify-end">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              void copyToClipboard(
+                                `${window.location.origin}/pickup?code=${encodeURIComponent(
+                                  pickupCode.code,
+                                )}`,
+                              )
+                            }
+                          >
+                            <Copy className="size-4" />
+                            Copy link
+                          </Button>
+                          <Button asChild variant="outline" size="sm">
+                            <Link href={`/pickup-codes/${pickupCode.id}`}>
+                              <ExternalLink className="size-4" />
+                              Details
+                            </Link>
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end border-t p-4">
+              <Dialog.Close asChild>
+                <Button variant="outline">Close</Button>
+              </Dialog.Close>
+            </div>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>

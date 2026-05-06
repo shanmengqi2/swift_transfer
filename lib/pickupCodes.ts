@@ -52,6 +52,10 @@ export type PickupCodeListItem = PickupCode & {
   filePreview: PickupFile[];
 };
 
+export type PickupCodeForFile = PickupCode & {
+  fileCount: number;
+};
+
 type PickupCodeRow = {
   id: string;
   code: string;
@@ -539,6 +543,37 @@ export async function listPickupCodes() {
     totalSize: row.total_size === null ? null : Number(row.total_size),
     missingFileCount: missingCountsByCode.get(row.id) ?? 0,
     filePreview: (filesByCode.get(row.id) ?? []).slice(0, 3),
+  }));
+}
+
+export async function listPickupCodesForFile(key: string) {
+  await ensureSchema();
+
+  const rows = (await getSql().query(
+    `
+      SELECT
+        pc.id,
+        pc.code,
+        pc.expires_at,
+        pc.created_at,
+        pc.updated_at,
+        pc.revoked_at,
+        COUNT(all_files."key")::int AS file_count
+      FROM pickup_codes pc
+      INNER JOIN pickup_code_files matching_file
+        ON matching_file.pickup_code_id = pc.id
+        AND matching_file."key" = $1
+      LEFT JOIN pickup_code_files all_files
+        ON all_files.pickup_code_id = pc.id
+      GROUP BY pc.id, pc.code, pc.expires_at, pc.created_at, pc.updated_at, pc.revoked_at
+      ORDER BY pc.created_at DESC
+    `,
+    [key],
+  )) as (PickupCodeRow & { file_count: number })[];
+
+  return rows.map((row) => ({
+    ...mapPickupCodeRow(row),
+    fileCount: Number(row.file_count),
   }));
 }
 
