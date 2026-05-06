@@ -1,11 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
   Clock,
   Copy,
+  ExternalLink,
   Infinity,
   KeyRound,
   Loader2,
@@ -30,6 +32,8 @@ type PickupCodeListItem = {
   code: string;
   expiresAt: string | null;
   createdAt: string;
+  updatedAt: string;
+  revokedAt: string | null;
   fileCount: number;
   totalSize: number | null;
   missingFileCount: number;
@@ -68,6 +72,14 @@ function formatDate(value: string | null) {
 }
 
 function getStatus(pickupCode: PickupCodeListItem) {
+  if (pickupCode.revokedAt) {
+    return {
+      label: "Revoked",
+      icon: XCircle,
+      className: "text-destructive",
+    };
+  }
+
   if (!pickupCode.expiresAt) {
     return {
       label: "Permanent",
@@ -226,15 +238,17 @@ export function PickupCodesManager() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-245 table-fixed text-sm">
+          <table className="w-full min-w-190 table-fixed text-sm">
             <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
               <tr className="border-b">
-                <th className="w-36 px-4 py-3 font-medium">Code</th>
-                <th className="w-32 px-4 py-3 font-medium">Status</th>
-                <th className="w-110 px-4 py-3 font-medium">Files</th>
-                <th className="w-44 px-4 py-3 font-medium">Expires</th>
-                <th className="w-44 px-4 py-3 font-medium">Created</th>
-                <th className="w-28 px-4 py-3 text-right font-medium">
+                <th className="w-30 px-4 py-3 font-medium">Code</th>
+                <th className="w-28 px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium">Files</th>
+                <th className="w-40 px-4 py-3 font-medium">Expires</th>
+                <th className="hidden w-40 px-4 py-3 font-medium lg:table-cell">
+                  Created
+                </th>
+                <th className="sticky right-0 w-24 bg-muted/50 px-4 py-3 text-right font-medium shadow-[-8px_0_12px_-12px_rgba(0,0,0,0.45)]">
                   Actions
                 </th>
               </tr>
@@ -318,11 +332,11 @@ export function PickupCodesManager() {
                           </div>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">
+                      <td className="hidden px-4 py-3 text-muted-foreground lg:table-cell">
                         {formatDate(pickupCode.createdAt)}
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex justify-end">
+                      <td className="sticky right-0 bg-card px-4 py-3 shadow-[-8px_0_12px_-12px_rgba(0,0,0,0.45)]">
+                        <div className="flex justify-end gap-2">
                           <Button
                             variant="outline"
                             size="icon"
@@ -337,6 +351,14 @@ export function PickupCodesManager() {
                           >
                             <Copy className="size-4" />
                             <span className="sr-only">Copy pickup link</span>
+                          </Button>
+                          <Button asChild variant="outline" size="icon">
+                            <Link href={`/pickup-codes/${pickupCode.id}`}>
+                              <ExternalLink className="size-4" />
+                              <span className="sr-only">
+                                Open pickup code detail
+                              </span>
+                            </Link>
                           </Button>
                         </div>
                       </td>

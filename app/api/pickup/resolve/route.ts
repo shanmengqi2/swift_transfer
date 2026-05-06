@@ -6,6 +6,7 @@ import { getBucketName } from "@/lib/files";
 import {
   getPickupShareByCode,
   isPickupCodeExpired,
+  isPickupCodeRevoked,
   type PickupFileLink,
 } from "@/lib/pickupCodes";
 import { getS3Client } from "@/lib/s3Client";
@@ -49,7 +50,11 @@ export async function POST(request: Request) {
 
     const pickupShare = await getPickupShareByCode(validation.data.code);
 
-    if (!pickupShare || isPickupCodeExpired(pickupShare.expiresAt)) {
+    if (
+      !pickupShare ||
+      isPickupCodeRevoked(pickupShare.revokedAt) ||
+      isPickupCodeExpired(pickupShare.expiresAt)
+    ) {
       return NextResponse.json(
         { error: "Pickup code is invalid or expired" },
         { status: 404 },

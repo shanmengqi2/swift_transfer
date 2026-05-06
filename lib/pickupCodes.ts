@@ -20,6 +20,8 @@ export type PickupCode = {
   code: string;
   expiresAt: string | null;
   createdAt: string;
+  updatedAt: string;
+  revokedAt: string | null;
 };
 
 export type PickupFile = {
@@ -55,6 +57,8 @@ type PickupCodeRow = {
   code: string;
   expires_at: string | null;
   created_at: string;
+  updated_at: string;
+  revoked_at: string | null;
 };
 
 type PickupFileRow = {
@@ -79,8 +83,27 @@ async function ensureSchema() {
           id TEXT PRIMARY KEY,
           code TEXT NOT NULL UNIQUE,
           expires_at TEXT,
-          created_at TEXT NOT NULL
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          revoked_at TEXT
         );
+      `);
+      await getSql().query(`
+        ALTER TABLE pickup_codes
+        ADD COLUMN IF NOT EXISTS updated_at TEXT;
+      `);
+      await getSql().query(`
+        ALTER TABLE pickup_codes
+        ADD COLUMN IF NOT EXISTS revoked_at TEXT;
+      `);
+      await getSql().query(`
+        UPDATE pickup_codes
+        SET updated_at = created_at
+        WHERE updated_at IS NULL;
+      `);
+      await getSql().query(`
+        ALTER TABLE pickup_codes
+        ALTER COLUMN updated_at SET NOT NULL;
       `);
       await getSql().query(`
         CREATE TABLE IF NOT EXISTS pickup_code_files (
@@ -118,6 +141,8 @@ function mapPickupCodeRow(row: PickupCodeRow): PickupCode {
     code: row.code,
     expiresAt: row.expires_at,
     createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    revokedAt: row.revoked_at,
   };
 }
 
@@ -132,6 +157,10 @@ function mapPickupFileRow(row: PickupFileRow): PickupFile {
 
 export function isPickupCodeExpired(expiresAt: string | null) {
   return expiresAt ? new Date(expiresAt).getTime() <= Date.now() : false;
+}
+
+export function isPickupCodeRevoked(revokedAt: string | null) {
+  return Boolean(revokedAt);
 }
 
 export async function createPickupCode({
@@ -153,8 +182,14 @@ export async function createPickupCode({
     try {
       await getSql().query(
         `
-          INSERT INTO pickup_codes (id, code, expires_at, created_at)
-          VALUES ($1, $2, $3, $4)
+          INSERT INTO pickup_codes (
+            id,
+            code,
+            expires_at,
+            created_at,
+            updated_at
+          )
+          VALUES ($1, $2, $3, $4, $4)
         `,
         [id, code, expiresAt, createdAt],
       );
@@ -246,6 +281,78 @@ export async function getPickupShareByCode(code: string) {
   };
 }
 
+export async function getPickupCodeById(id: string) {
+  await ensureSchema();
+
+  const codes = (await getSql().query(
+    "SELECT * FROM pickup_codes WHERE id = $1",
+    [id],
+  )) as PickupCodeRow[];
+  const codeRow = codes[0];
+
+  if (!codeRow) {
+    return null;
+  }
+
+  const files = (await getSql().query(
+    `
+      SELECT "key", bucket, file_name, size
+      FROM pickup_code_files
+      WHERE pickup_code_id = $1
+      ORDER BY added_at ASC, file_name ASC
+    `,
+    [codeRow.id],
+  )) as PickupFileRow[];
+  const existingObjectKeys = await listExistingObjectKeys();
+
+  return {
+    ...mapPickupCodeRow(codeRow),
+    files: files.map((file) => ({
+      ...mapPickupFileRow(file),
+      exists: existingObjectKeys.has(file.key),
+    })),
+  };
+}
+
+export async function updatePickupCodeExpiration({
+  id,
+  expiresAt,
+}: {
+  id: string;
+  expiresAt: string | null;
+}) {
+  await ensureSchema();
+
+  const rows = (await getSql().query(
+    `
+      UPDATE pickup_codes
+      SET expires_at = $2, updated_at = $3
+      WHERE id = $1
+      RETURNING *
+    `,
+    [id, expiresAt, new Date().toISOString()],
+  )) as PickupCodeRow[];
+
+  return rows[0] ? mapPickupCodeRow(rows[0]) : null;
+}
+
+export async function revokePickupCode(id: string) {
+  await ensureSchema();
+
+  const now = new Date().toISOString();
+  const rows = (await getSql().query(
+    `
+      UPDATE pickup_codes
+      SET revoked_at = COALESCE(revoked_at, $2), updated_at = $2
+      WHERE id = $1
+      RETURNING *
+    `,
+    [id, now],
+  )) as PickupCodeRow[];
+
+  return rows[0] ? mapPickupCodeRow(rows[0]) : null;
+}
+
 async function listExistingObjectKeys() {
   const bucket = getBucketName();
   const keys = new Set<string>();
@@ -282,11 +389,13 @@ export async function listPickupCodes() {
           pc.code,
           pc.expires_at,
           pc.created_at,
+          pc.updated_at,
+          pc.revoked_at,
           COUNT(pcf."key")::int AS file_count,
           SUM(pcf.size)::bigint AS total_size
         FROM pickup_codes pc
         LEFT JOIN pickup_code_files pcf ON pcf.pickup_code_id = pc.id
-        GROUP BY pc.id, pc.code, pc.expires_at, pc.created_at
+        GROUP BY pc.id, pc.code, pc.expires_at, pc.created_at, pc.updated_at, pc.revoked_at
         ORDER BY pc.created_at DESC
       `,
     ),
