@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authenticateRequest } from "@/lib/auth/guards";
 import { ensureSevenDayDownloadLink } from "@/lib/downloadLinks";
-import { createPickupCode } from "@/lib/pickupCodes";
+import { createPickupCode, listPickupCodes } from "@/lib/pickupCodes";
 
 export const runtime = "nodejs";
 
@@ -17,6 +17,26 @@ const createPickupCodeSchema = z.object({
   files: z.array(pickupFileSchema).min(1).max(100),
   expiresInMinutes: z.number().int().min(1).max(5256000).nullable(),
 });
+
+export async function GET(request: Request) {
+  try {
+    const auth = await authenticateRequest(request);
+    if (auth.response) {
+      return auth.response;
+    }
+
+    return NextResponse.json(
+      { pickupCodes: await listPickupCodes() },
+      { status: 200 },
+    );
+  } catch (error) {
+    console.error(error);
+    return NextResponse.json(
+      { error: "Failed to list pickup codes" },
+      { status: 500 },
+    );
+  }
+}
 
 export async function POST(request: Request) {
   try {

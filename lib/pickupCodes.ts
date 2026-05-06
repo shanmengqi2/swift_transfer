@@ -1,6 +1,8 @@
 import { randomBytes, randomInt } from "node:crypto";
+import { ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { displayFileName, getBucketName, type ManagedFile } from "@/lib/files";
 import { getSql } from "@/lib/postgres";
+import { getS3Client } from "@/lib/s3Client";
 
 const PICKUP_CODE_ALPHABET =
   "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -41,6 +43,13 @@ export type PickupFileLink = PickupFile & {
   downloadUrlExpiresAt: string | null;
 };
 
+export type PickupCodeListItem = PickupCode & {
+  fileCount: number;
+  totalSize: number | null;
+  missingFileCount: number;
+  filePreview: PickupFile[];
+};
+
 type PickupCodeRow = {
   id: string;
   code: string;
@@ -53,6 +62,11 @@ type PickupFileRow = {
   bucket: string;
   file_name: string;
   size: number | null;
+};
+
+type PickupCodeListRow = PickupCodeRow & {
+  file_count: number;
+  total_size: number | null;
 };
 
 let initialization: Promise<void> | undefined;
@@ -230,6 +244,87 @@ export async function getPickupShareByCode(code: string) {
     ...mapPickupCodeRow(codeRow),
     files: files.map(mapPickupFileRow),
   };
+}
+
+async function listExistingObjectKeys() {
+  const bucket = getBucketName();
+  const keys = new Set<string>();
+  let continuationToken: string | undefined;
+
+  do {
+    const response = await getS3Client().send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        ContinuationToken: continuationToken,
+      }),
+    );
+
+    for (const object of response.Contents ?? []) {
+      if (object.Key) {
+        keys.add(object.Key);
+      }
+    }
+
+    continuationToken = response.NextContinuationToken;
+  } while (continuationToken);
+
+  return keys;
+}
+
+export async function listPickupCodes() {
+  await ensureSchema();
+
+  const [rawCodeRows, rawFileRows, existingObjectKeys] = await Promise.all([
+    getSql().query(
+      `
+        SELECT
+          pc.id,
+          pc.code,
+          pc.expires_at,
+          pc.created_at,
+          COUNT(pcf."key")::int AS file_count,
+          SUM(pcf.size)::bigint AS total_size
+        FROM pickup_codes pc
+        LEFT JOIN pickup_code_files pcf ON pcf.pickup_code_id = pc.id
+        GROUP BY pc.id, pc.code, pc.expires_at, pc.created_at
+        ORDER BY pc.created_at DESC
+      `,
+    ),
+    getSql().query(
+      `
+        SELECT pickup_code_id, "key", bucket, file_name, size
+        FROM pickup_code_files
+        ORDER BY added_at ASC, file_name ASC
+      `,
+    ),
+    listExistingObjectKeys(),
+  ]);
+  const codeRows = rawCodeRows as PickupCodeListRow[];
+  const fileRows = rawFileRows as (PickupFileRow & { pickup_code_id: string })[];
+  const filesByCode = new Map<string, PickupFile[]>();
+  const missingCountsByCode = new Map<string, number>();
+
+  for (const row of fileRows) {
+    const file = mapPickupFileRow(row);
+    const files = filesByCode.get(row.pickup_code_id) ?? [];
+    files.push(file);
+    filesByCode.set(row.pickup_code_id, files);
+
+    if (!existingObjectKeys.has(row.key)) {
+      missingCountsByCode.set(
+        row.pickup_code_id,
+        (missingCountsByCode.get(row.pickup_code_id) ?? 0) + 1,
+      );
+    }
+  }
+
+  return codeRows.map((row) => ({
+    ...mapPickupCodeRow(row),
+    fileCount: Number(row.file_count),
+    totalSize: row.total_size === null ? null : Number(row.total_size),
+    missingFileCount: missingCountsByCode.get(row.id) ?? 0,
+    filePreview: (filesByCode.get(row.id) ?? []).slice(0, 3),
+  }));
 }
 
 export async function listPickupFileUsage(keys: string[]) {

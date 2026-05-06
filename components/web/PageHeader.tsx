@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import {
   ArrowLeftRight,
+  KeyRound,
   Loader2,
   LogOut,
   UploadCloud,
@@ -15,7 +16,7 @@ import { cn } from "@/lib/utils";
 type PageHeaderProps = {
   title: string;
   description: string;
-  activePage: "upload" | "files";
+  activePage: "upload" | "files" | "pickup-codes";
   username?: string;
 };
 
@@ -68,6 +69,18 @@ export function PageHeader({
             <Link href="/files">
               <ArrowLeftRight className="size-4" />
               Manage files
+            </Link>
+          </Button>
+          <Button
+            asChild
+            variant={activePage === "pickup-codes" ? "default" : "outline"}
+            className={cn(
+              activePage === "pickup-codes" && "pointer-events-none",
+            )}
+          >
+            <Link href="/pickup-codes">
+              <KeyRound className="size-4" />
+              Pickup codes
             </Link>
           </Button>
         </div>
