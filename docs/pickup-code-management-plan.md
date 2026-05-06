@@ -70,18 +70,19 @@ Keep `pickup_code_files.file_name` and `pickup_code_files.size` as snapshots so 
 
 ## Implementation Order
 
-1. Add `/pickup-codes` list page with automatic file summary.
-2. Add `/pickup-codes/[id]` detail page with expiration editing and revoke.
-3. Add file add/remove operations in the detail page.
+1. Add `/pickup-codes` list page with automatic file summary. **Done.**
+2. Add `/pickup-codes/[id]` detail page with expiration editing and revoke. **Done.**
+3. Add file add/remove operations in the detail page. **Current.**
 4. Add file-manager action for “View pickup codes”.
 5. Add optional title/note only if the automatic summary proves insufficient.
 6. Add later security/admin hardening such as brute-force protection and audit fields.
 
 ## Current Step
 
-Implement step 1 only:
+Implement step 3:
 
-- Protected `/pickup-codes` route.
-- Protected `GET /api/pickup-codes`.
-- Automatic summary from associated files.
-- No detail editing yet.
+- Add protected API actions for adding files to a pickup code.
+- Add protected API actions for removing files from a pickup code.
+- Update `/pickup-codes/[id]` so administrators can add existing S3 files and remove associated files.
+- Keep S3 objects intact when removing a file from a pickup code.
+- Disable file membership edits for revoked pickup codes.

@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authenticateRequest } from "@/lib/auth/guards";
+import { ensureSevenDayDownloadLink } from "@/lib/downloadLinks";
 import {
+  addPickupCodeFiles,
   getPickupCodeById,
+  isPickupCodeRevoked,
+  removePickupCodeFile,
   revokePickupCode,
   updatePickupCodeExpiration,
 } from "@/lib/pickupCodes";
@@ -16,6 +20,24 @@ const updatePickupCodeSchema = z.discriminatedUnion("action", [
   }),
   z.object({
     action: z.literal("revoke"),
+  }),
+  z.object({
+    action: z.literal("add-files"),
+    files: z
+      .array(
+        z.object({
+          key: z.string().min(1),
+          bucket: z.string().min(1).optional(),
+          fileName: z.string().min(1).optional(),
+          size: z.number().int().nonnegative().optional(),
+        }),
+      )
+      .min(1)
+      .max(100),
+  }),
+  z.object({
+    action: z.literal("remove-file"),
+    key: z.string().min(1),
   }),
 ]);
 
@@ -71,22 +93,51 @@ export async function PATCH(
     }
 
     const { id } = await params;
-    const pickupCode =
-      validation.data.action === "revoke"
-        ? await revokePickupCode(id)
-        : await updatePickupCodeExpiration({
-            id,
-            expiresAt: validation.data.expiresAt,
-          });
+    const currentPickupCode = await getPickupCodeById(id);
 
-    if (!pickupCode) {
+    if (!currentPickupCode) {
       return NextResponse.json(
         { error: "Pickup code not found" },
         { status: 404 },
       );
     }
 
-    return NextResponse.json({ pickupCode }, { status: 200 });
+    if (
+      validation.data.action !== "revoke" &&
+      isPickupCodeRevoked(currentPickupCode.revokedAt)
+    ) {
+      return NextResponse.json(
+        { error: "Revoked pickup codes cannot be modified" },
+        { status: 409 },
+      );
+    }
+
+    if (validation.data.action === "revoke") {
+      await revokePickupCode(id);
+    }
+
+    if (validation.data.action === "update-expiration") {
+      await updatePickupCodeExpiration({
+        id,
+        expiresAt: validation.data.expiresAt,
+      });
+    }
+
+    if (validation.data.action === "add-files") {
+      await Promise.all(
+        validation.data.files.map((file) => ensureSevenDayDownloadLink(file.key)),
+      );
+      await addPickupCodeFiles({ id, files: validation.data.files });
+    }
+
+    if (validation.data.action === "remove-file") {
+      await removePickupCodeFile({ id, key: validation.data.key });
+    }
+
+    return NextResponse.json(
+      { pickupCode: await getPickupCodeById(id) },
+      { status: 200 },
+    );
   } catch (error) {
     console.error(error);
     return NextResponse.json(

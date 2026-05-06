@@ -353,6 +353,112 @@ export async function revokePickupCode(id: string) {
   return rows[0] ? mapPickupCodeRow(rows[0]) : null;
 }
 
+export async function addPickupCodeFiles({
+  id,
+  files,
+}: {
+  id: string;
+  files: PickupFileInput[];
+}) {
+  await ensureSchema();
+
+  const existingCodeRows = (await getSql().query(
+    "SELECT id FROM pickup_codes WHERE id = $1",
+    [id],
+  )) as { id: string }[];
+
+  if (!existingCodeRows[0]) {
+    return false;
+  }
+
+  const bucket = getBucketName();
+  const now = new Date().toISOString();
+
+  await getSql().query(
+    `
+      INSERT INTO pickup_code_files (
+        pickup_code_id,
+        "key",
+        bucket,
+        file_name,
+        size,
+        added_at
+      )
+      SELECT
+        $1,
+        file_rows.key,
+        file_rows.bucket,
+        file_rows.file_name,
+        file_rows.size,
+        $2
+      FROM jsonb_to_recordset($3::jsonb) AS file_rows(
+        key TEXT,
+        bucket TEXT,
+        file_name TEXT,
+        size BIGINT
+      )
+      ON CONFLICT (pickup_code_id, "key") DO UPDATE SET
+        bucket = excluded.bucket,
+        file_name = excluded.file_name,
+        size = excluded.size
+    `,
+    [
+      id,
+      now,
+      JSON.stringify(
+        files.map((file) => ({
+          key: file.key,
+          bucket: file.bucket ?? bucket,
+          file_name: file.fileName ?? displayFileName(file.key),
+          size: file.size ?? null,
+        })),
+      ),
+    ],
+  );
+
+  await getSql().query(
+    "UPDATE pickup_codes SET updated_at = $2 WHERE id = $1",
+    [id, now],
+  );
+
+  return true;
+}
+
+export async function removePickupCodeFile({
+  id,
+  key,
+}: {
+  id: string;
+  key: string;
+}) {
+  await ensureSchema();
+
+  const now = new Date().toISOString();
+  const rows = (await getSql().query(
+    `
+      UPDATE pickup_codes
+      SET updated_at = $2
+      WHERE id = $1
+      RETURNING id
+    `,
+    [id, now],
+  )) as { id: string }[];
+
+  if (!rows[0]) {
+    return false;
+  }
+
+  await getSql().query(
+    `
+      DELETE FROM pickup_code_files
+      WHERE pickup_code_id = $1 AND "key" = $2
+    `,
+    [id, key],
+  );
+
+  return true;
+}
+
 async function listExistingObjectKeys() {
   const bucket = getBucketName();
   const keys = new Set<string>();
