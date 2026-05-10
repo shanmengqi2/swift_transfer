@@ -17,6 +17,10 @@ AUTH_USERS="alice:scrypt:v1:..."
 
 Multiple users can be comma-separated in `AUTH_USERS`.
 
+The login and public pickup-code APIs use Postgres-backed rate limiting. The
+`rate_limit_buckets` table is created automatically from `POSTGRES_URL`; no
+separate Redis, Turnstile, or other service is required.
+
 First, run the development server:
 
 ```bash

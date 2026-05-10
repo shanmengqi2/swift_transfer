@@ -42,6 +42,7 @@ UPLOAD_MAX_FILE_SIZE_MB=100
 - `AUTH_SECRET` 至少 32 个字符，用于签名登录 Cookie。
 - `AUTH_USERS` 为允许登录的用户列表，格式为 `username:scrypt:v1:...`，多个用户用英文逗号分隔。
 - `POSTGRES_URL` 为 Neon/Postgres 连接字符串，用于保存已生成下载链接等元数据。
+- 登录接口和公开取件码接口会使用同一个 Postgres 连接进行后端限速，并自动创建 `rate_limit_buckets` 表，无需额外配置 Redis、Turnstile 或其它服务。
 - `UPLOAD_MAX_FILES` 和 `UPLOAD_MAX_FILE_SIZE_MB` 可按环境调整。
 
 ## 创建登录用户
