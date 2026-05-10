@@ -5,10 +5,10 @@
 ## 当前适配
 
 - `vercel.json` 指定 Vercel 使用 Next.js 框架、`pnpm install --frozen-lockfile` 和 `pnpm build`。
-- `package.json` 声明 `node: 24.x`，与 Docker 镜像一致，并满足项目中 `node:sqlite` 的运行要求。
-- Vercel 环境没有持久化本地磁盘，应用在 Vercel 上默认将临时 SQLite 文件写入 `/tmp/swift-transfer.sqlite`，避免写入只读部署目录。
+- `package.json` 声明 `node: 24.x`，与 Docker 镜像一致。
+- 应用通过 `POSTGRES_URL` 连接 Neon/Postgres 保存已生成下载链接等元数据，避免依赖 Vercel 临时磁盘。
 
-注意：Vercel 上的 `/tmp` 是临时存储，不适合长期保存数据。本项目的文件本体存放在 S3 兼容对象存储中；SQLite 只记录已生成的下载链接元数据。函数冷启动、实例切换或重新部署后，历史下载链接元数据可能丢失，但对象存储中的文件不会受影响，可以重新生成下载链接。若未来需要持久保存下载链接记录，建议增加外部数据库或 KV 存储适配。
+注意：本项目的文件本体存放在 S3 兼容对象存储中；Postgres 只记录已生成的下载链接元数据。若同时使用多个部署环境，建议为 Preview 使用独立 bucket、对象前缀或独立数据库，避免测试数据混入生产环境。
 
 ## 前置条件
 
@@ -28,6 +28,8 @@ AWS_ENDPOINT_URL_S3=
 AWS_REGION=
 S3_BUCKET_NAME=
 
+POSTGRES_URL=
+
 AUTH_SECRET=
 AUTH_USERS=
 
@@ -39,8 +41,9 @@ UPLOAD_MAX_FILE_SIZE_MB=100
 
 - `AUTH_SECRET` 至少 32 个字符，用于签名登录 Cookie。
 - `AUTH_USERS` 为允许登录的用户列表，格式为 `username:scrypt:v1:...`，多个用户用英文逗号分隔。
+- `POSTGRES_URL` 为 Neon/Postgres 连接字符串，用于保存已生成下载链接等元数据。
+- 登录接口和公开取件码接口会使用同一个 Postgres 连接进行后端限速，并自动创建 `rate_limit_buckets` 表，无需额外配置 Redis、Turnstile 或其它服务。
 - `UPLOAD_MAX_FILES` 和 `UPLOAD_MAX_FILE_SIZE_MB` 可按环境调整。
-- 通常不需要在 Vercel 上配置 `SWIFT_TRANSFER_DB_PATH`。如果要显式配置，只能使用 `/tmp` 下的路径，例如 `/tmp/swift-transfer.sqlite`。
 
 ## 创建登录用户
 
@@ -181,15 +184,9 @@ Vercel 部署不会使用 Docker 镜像，也不会触发 `.github/workflows/doc
 
 - `Dockerfile`
 - `next.config.ts` 中的 `output: "standalone"`
-- `SWIFT_TRANSFER_DB_PATH=/app/.data/swift-transfer.sqlite`
-- 容器 volume `/app/.data`
+- `POSTGRES_URL` 指向同一个或另一个 Neon/Postgres 数据库
 
-因此两种部署方式的主要区别是本地元数据存储位置：
-
-| 部署方式 | SQLite 路径 | 持久化方式 |
-| --- | --- | --- |
-| Docker | `/app/.data/swift-transfer.sqlite` | Docker volume |
-| Vercel | `/tmp/swift-transfer.sqlite` | 临时存储 |
+因此两种部署方式都不依赖本地数据库文件，元数据持久化由外部 Postgres 提供。
 
 文件本体始终在 S3 兼容对象存储中，两种部署方式可以共用同一个桶。若同时使用 Docker 生产环境和 Vercel 预览环境，建议为 Preview 使用独立 bucket 或对象前缀，避免测试文件混入生产文件列表。
 

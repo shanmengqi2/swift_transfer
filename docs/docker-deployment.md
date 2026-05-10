@@ -40,6 +40,8 @@ AWS_ENDPOINT_URL_S3=
 AWS_REGION=
 S3_BUCKET_NAME=
 
+POSTGRES_URL=
+
 AUTH_SECRET=
 AUTH_USERS=
 ```
@@ -51,19 +53,14 @@ UPLOAD_MAX_FILES=5
 UPLOAD_MAX_FILE_SIZE_MB=100
 ```
 
-可选变量：
-
-```env
-SWIFT_TRANSFER_DB_PATH=/app/.data/swift-transfer.sqlite
-```
-
 说明：
 
 - `AUTH_SECRET` 至少 32 个字符，用于签名登录会话。
 - `AUTH_USERS` 为允许登录的用户列表。
+- `POSTGRES_URL` 为 Neon/Postgres 连接字符串，用于保存已生成下载链接等元数据。
+- 登录接口和公开取件码接口会使用同一个 Postgres 连接进行后端限速，并自动创建 `rate_limit_buckets` 表，无需额外配置 Redis、Turnstile 或其它服务。
 - `UPLOAD_MAX_FILES` 是单次拖拽/选择允许上传的最大文件数。
 - `UPLOAD_MAX_FILE_SIZE_MB` 是单个文件大小上限，单位 MB。
-- `SWIFT_TRANSFER_DB_PATH` 默认就是 `/app/.data/swift-transfer.sqlite`，通常无需改。
 
 ## 创建登录用户
 
@@ -137,7 +134,6 @@ docker run -d \
   --restart unless-stopped \
   --env-file .env.production \
   -p 3000:3000 \
-  -v swift-transfer-data:/app/.data \
   shanmengqi/swift_transfer:latest
 ```
 
@@ -163,11 +159,6 @@ services:
       - .env.production
     ports:
       - "3000:3000"
-    volumes:
-      - swift-transfer-data:/app/.data
-
-volumes:
-  swift-transfer-data:
 ```
 
 启动：
@@ -199,11 +190,6 @@ services:
       - .env.production
     ports:
       - "3000:3000"
-    volumes:
-      - swift-transfer-data:/app/.data
-
-volumes:
-  swift-transfer-data:
 ```
 
 这个方式可以在 Mac 上通过模拟运行，但性能和启动速度通常不如原生 `linux/arm64` 镜像。正式解决后可删除 `platform: linux/amd64`。
@@ -229,15 +215,7 @@ docker compose up -d
 
 ## 数据持久化
 
-应用会在 `/app/.data` 下保存 SQLite 数据库，用于记录已生成的下载链接等数据。
-
-建议始终挂载 volume：
-
-```bash
--v swift-transfer-data:/app/.data
-```
-
-如果删除该 volume，应用仍可运行，但历史下载链接记录会丢失。
+应用通过 `POSTGRES_URL` 连接 Neon/Postgres 保存已生成下载链接等元数据，文件本体仍保存在 S3 兼容对象存储中。Docker 容器本地不再需要挂载数据库 volume。
 
 ## 反向代理示例
 

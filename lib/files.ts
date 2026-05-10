@@ -7,6 +7,7 @@ export type ManagedFile = {
   presignedUrl: string | null;
   presignedUrlExpiresAt: string | null;
   presignedUrlCreatedAt: string | null;
+  pickupCodeCount?: number;
 };
 
 export function getBucketName() {

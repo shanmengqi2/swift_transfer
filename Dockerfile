@@ -28,14 +28,13 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
-ENV SWIFT_TRANSFER_DB_PATH=/app/.data/swift-transfer.sqlite
 
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=builder --chown=node:node /app/public ./public
 COPY --from=builder --chown=node:node /app/scripts/hash-password.mjs ./scripts/hash-password.mjs
 
-RUN mkdir -p /app/.data && chown -R node:node /app
+RUN chown -R node:node /app
 
 USER node
 

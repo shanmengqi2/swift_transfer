@@ -1,11 +1,8 @@
-import { GetObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authenticateRequest } from "@/lib/auth/guards";
-import { getBucketName } from "@/lib/files";
-import { getPresignedLink, savePresignedLink } from "@/lib/presignedLinks";
-import { getS3Client } from "@/lib/s3Client";
+import { createPresignedDownloadLink } from "@/lib/downloadLinks";
+import { getPresignedLink } from "@/lib/presignedLinks";
 
 export const runtime = "nodejs";
 
@@ -29,30 +26,7 @@ export async function POST(request: Request) {
     }
 
     const { key, expiresInSeconds } = validation.data;
-    const bucket = getBucketName();
-    const createdAt = new Date();
-    const expiresAt = new Date(
-      createdAt.getTime() + expiresInSeconds * 1000,
-    ).toISOString();
-    const url = await getSignedUrl(
-      getS3Client(),
-      new GetObjectCommand({
-        Bucket: bucket,
-        Key: key,
-      }),
-      { expiresIn: expiresInSeconds },
-    );
-
-    const link = {
-      key,
-      bucket,
-      url,
-      expiresAt,
-      expiresInSeconds,
-      createdAt: createdAt.toISOString(),
-    };
-
-    savePresignedLink(link);
+    const link = await createPresignedDownloadLink(key, expiresInSeconds);
 
     return NextResponse.json({ link }, { status: 200 });
   } catch (error) {
@@ -77,5 +51,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Key is required" }, { status: 400 });
   }
 
-  return NextResponse.json({ link: getPresignedLink(key) }, { status: 200 });
+  return NextResponse.json(
+    { link: await getPresignedLink(key) },
+    { status: 200 },
+  );
 }

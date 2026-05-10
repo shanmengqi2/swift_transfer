@@ -2,6 +2,7 @@ import { ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/auth/guards";
 import { displayFileName, getBucketName, type ManagedFile } from "@/lib/files";
+import { attachPickupMetadata } from "@/lib/pickupCodes";
 import { listPresignedLinks } from "@/lib/presignedLinks";
 import { getS3Client } from "@/lib/s3Client";
 
@@ -33,7 +34,7 @@ export async function GET(request: Request) {
     const keys = objects
       .map((object) => object.Key)
       .filter((key): key is string => Boolean(key));
-    const links = listPresignedLinks(keys);
+    const links = await listPresignedLinks(keys);
 
     const files: ManagedFile[] = objects
       .filter((object) => Boolean(object.Key))
@@ -53,7 +54,10 @@ export async function GET(request: Request) {
         };
       });
 
-    return NextResponse.json({ files }, { status: 200 });
+    return NextResponse.json(
+      { files: await attachPickupMetadata(files) },
+      { status: 200 },
+    );
   } catch (error) {
     console.error(error);
     return NextResponse.json(
