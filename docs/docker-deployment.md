@@ -1,37 +1,39 @@
-# Docker 部署指南
+# Docker Deployment Guide
 
-本文档说明如何使用 Docker 部署 Swift Transfer。当前已发布镜像：
+| Language | Project docs |
+| --- | --- |
+| **English** · [简体中文](./docker-deployment.zh-CN.md) | [README](../README.md) · [Vercel guide](./vercel-deployment.md) |
+
+This guide explains how to run Swift Transfer with Docker using the published
+image:
 
 ```bash
 shanmengqi/swift_transfer:latest
 ```
 
-镜像建议发布为多架构 manifest，至少包含：
+## Prerequisites
 
-```text
-linux/amd64
-linux/arm64
-```
+- Docker installed on the target server.
+- An S3-compatible bucket, such as AWS S3, Cloudflare R2, or MinIO.
+- A Postgres database URL, such as Neon or a managed Postgres instance.
+- An HTTPS domain or reverse proxy for production traffic.
 
-其中 `linux/arm64` 用于 Apple Silicon Mac、ARM 服务器等环境。
+Production containers run with `NODE_ENV=production`, and login cookies are
+marked `Secure`. Put the app behind HTTPS before exposing it to users.
 
-## 前置条件
+The object storage endpoint used by `AWS_ENDPOINT_URL_S3` must be reachable by
+the user browser, because uploads and downloads use presigned URLs directly from
+the client.
 
-- 一台已安装 Docker 的服务器。
-- 一个可用的 S3 兼容对象存储桶，例如 AWS S3、Cloudflare R2、MinIO 等。
-- 一个可通过 HTTPS 访问的域名或反向代理。生产镜像会以 `NODE_ENV=production` 运行，登录 Cookie 会带 `Secure` 标记，因此正式访问建议放在 HTTPS 后面。
+## Environment Variables
 
-如果浏览器需要直接通过预签名 URL 上传文件，对象存储的 endpoint 必须能被用户浏览器访问。不要只配置容器内部可访问的内网地址，除非浏览器也能访问该地址。
-
-## 环境变量
-
-可以基于 `sample.env` 创建生产环境配置文件：
+Create an environment file for the container:
 
 ```bash
 cp sample.env .env.production
 ```
 
-必填变量：
+Required variables:
 
 ```env
 AWS_ACCESS_KEY_ID=
@@ -46,59 +48,68 @@ AUTH_SECRET=
 AUTH_USERS=
 ```
 
-上传限制，可运行时调整，无需重新构建镜像：
+Optional upload limits:
 
 ```env
 UPLOAD_MAX_FILES=5
 UPLOAD_MAX_FILE_SIZE_MB=100
 ```
 
-说明：
+Notes:
 
-- `AUTH_SECRET` 至少 32 个字符，用于签名登录会话。
-- `AUTH_USERS` 为允许登录的用户列表。
-- `POSTGRES_URL` 为 Neon/Postgres 连接字符串，用于保存已生成下载链接等元数据。
-- 登录接口和公开取件码接口会使用同一个 Postgres 连接进行后端限速，并自动创建 `rate_limit_buckets` 表，无需额外配置 Redis、Turnstile 或其它服务。
-- `UPLOAD_MAX_FILES` 是单次拖拽/选择允许上传的最大文件数。
-- `UPLOAD_MAX_FILE_SIZE_MB` 是单个文件大小上限，单位 MB。
+- `AUTH_SECRET` must be at least 32 characters.
+- `AUTH_USERS` contains allowed login users in
+  `username:scrypt:v1:...` format, separated by commas.
+- `POSTGRES_URL` stores download-link metadata, pickup codes, and rate-limit
+  buckets.
+- `UPLOAD_MAX_FILES` controls how many files can be selected in one upload
+  batch.
+- `UPLOAD_MAX_FILE_SIZE_MB` controls the per-file upload size limit.
 
-## 创建登录用户
+## Create Login Users
 
-如果已经有项目代码，可以在项目目录中生成用户密码 hash：
+If you have the project checked out locally:
 
 ```bash
 pnpm auth:hash <username> <password>
 ```
 
-如果只使用 Docker 镜像部署，不想拉取 repo 或单独下载脚本文件，也可以直接用镜像生成同样格式的用户信息：
+If you only want to use the Docker image:
 
 ```bash
 docker run --rm shanmengqi/swift_transfer:latest node scripts/hash-password.mjs <username> <password>
 ```
 
-命令会输出类似：
+The command prints a value like:
 
 ```env
 alice:scrypt:v1:...
 ```
 
-将结果写入 `AUTH_USERS`：
+Add it to `AUTH_USERS`:
 
 ```env
 AUTH_USERS=alice:scrypt:v1:...
 ```
 
-多个用户用英文逗号分隔：
+Multiple users can be separated with commas:
 
 ```env
 AUTH_USERS=alice:scrypt:v1:...,bob:scrypt:v1:...
 ```
 
-## 对象存储 CORS
+Generate a strong session secret:
 
-浏览器会直接向预签名 URL 发起 `PUT` 上传请求，因此 S3 兼容存储需要允许前端站点跨域上传。
+```bash
+openssl rand -base64 32
+```
 
-示例 CORS 配置，请按实际域名调整：
+## Object Storage CORS
+
+Browsers upload files directly to presigned object storage URLs. Configure CORS
+on the bucket so your site can send `PUT` requests and read download responses.
+
+Example CORS rule:
 
 ```json
 [
@@ -112,21 +123,21 @@ AUTH_USERS=alice:scrypt:v1:...,bob:scrypt:v1:...
 ]
 ```
 
-本地测试时可临时加入：
+For local testing, temporarily add:
 
 ```json
 "http://localhost:3000"
 ```
 
-## 使用 Docker Run
+## Run with Docker
 
-拉取镜像：
+Pull the image:
 
 ```bash
 docker pull shanmengqi/swift_transfer:latest
 ```
 
-启动容器：
+Start the container:
 
 ```bash
 docker run -d \
@@ -137,17 +148,18 @@ docker run -d \
   shanmengqi/swift_transfer:latest
 ```
 
-访问：
+Open:
 
 ```text
 http://<server-ip>:3000
 ```
 
-正式环境建议使用 Nginx、Caddy、Traefik 等反向代理提供 HTTPS，再转发到容器的 `3000` 端口。
+For production, place Nginx, Caddy, Traefik, or another reverse proxy in front
+of the container and terminate HTTPS there.
 
-## 使用 Docker Compose
+## Run with Docker Compose
 
-创建 `compose.yml`：
+Create `compose.yml`:
 
 ```yaml
 services:
@@ -161,65 +173,34 @@ services:
       - "3000:3000"
 ```
 
-启动：
+Start:
 
 ```bash
 docker compose up -d
 ```
 
-### Apple Silicon Mac 平台说明
-
-如果在 Apple Silicon Mac 上看到类似错误：
-
-```text
-no matching manifest for linux/arm64/v8 in the manifest list entries
-```
-
-说明当前 Docker Hub 镜像没有发布 `linux/arm64` 架构。推荐做法是重新运行 GitHub Action，推送包含 `linux/amd64,linux/arm64` 的多架构镜像。
-
-临时绕过方案是在 `compose.yml` 中指定使用 `linux/amd64` 镜像：
-
-```yaml
-services:
-  swift-transfer:
-    image: shanmengqi/swift_transfer:latest
-    platform: linux/amd64
-    container_name: swift-transfer
-    restart: unless-stopped
-    env_file:
-      - .env.production
-    ports:
-      - "3000:3000"
-```
-
-这个方式可以在 Mac 上通过模拟运行，但性能和启动速度通常不如原生 `linux/arm64` 镜像。正式解决后可删除 `platform: linux/amd64`。
-
-查看日志：
+View logs:
 
 ```bash
 docker compose logs -f swift-transfer
 ```
 
-停止：
-
-```bash
-docker compose down
-```
-
-更新到最新镜像：
+Update to the latest image:
 
 ```bash
 docker compose pull
 docker compose up -d
 ```
 
-## 数据持久化
+Stop:
 
-应用通过 `POSTGRES_URL` 连接 Neon/Postgres 保存已生成下载链接等元数据，文件本体仍保存在 S3 兼容对象存储中。Docker 容器本地不再需要挂载数据库 volume。
+```bash
+docker compose down
+```
 
-## 反向代理示例
+## Reverse Proxy Example
 
-Nginx 示例：
+Nginx example:
 
 ```nginx
 server {
@@ -237,83 +218,33 @@ server {
 }
 ```
 
-生产环境请在 Nginx 或前置网关上启用 HTTPS。
+Enable HTTPS at the proxy or upstream gateway before production use.
 
-## 常用运维命令
+## Data Persistence
 
-查看容器状态：
+The container does not need a local database volume. Swift Transfer stores:
+
+- File bodies in the configured S3-compatible bucket.
+- Download-link metadata, pickup codes, and rate-limit buckets in Postgres.
+
+Back up and monitor the external Postgres database and object storage bucket
+according to your infrastructure policy.
+
+## Deployment Check
+
+After the container is running:
+
+1. Open `/login` and sign in with a user from `AUTH_USERS`.
+2. Upload a small test file.
+3. Open `/files` and confirm the file appears.
+4. Generate a download link and verify it in a private browser window.
+5. Create a pickup code and verify the public `/pickup` flow.
+6. Delete the test file and confirm it is removed from object storage.
+
+Useful commands:
 
 ```bash
 docker ps --filter name=swift-transfer
-```
-
-查看日志：
-
-```bash
 docker logs -f swift-transfer
-```
-
-重启：
-
-```bash
-docker restart swift-transfer
-```
-
-进入容器：
-
-```bash
-docker exec -it swift-transfer sh
-```
-
-查看镜像：
-
-```bash
-docker images shanmengqi/swift_transfer
-```
-
-## 故障排查
-
-### 登录后仍停留在登录页
-
-生产镜像中的登录 Cookie 使用 `Secure`。请确认访问地址是 HTTPS，或者确认反向代理正确透传请求。
-
-### 上传失败或浏览器 CORS 报错
-
-检查对象存储桶 CORS 是否允许当前站点的 origin，并确认允许 `PUT` 方法。
-
-### 预签名 URL 无法访问
-
-确认 `AWS_ENDPOINT_URL_S3` 对用户浏览器可访问。浏览器会直接请求该地址进行上传或下载。
-
-### 容器启动后接口报 S3 配置错误
-
-检查这些变量是否已注入容器：
-
-```env
-AWS_ACCESS_KEY_ID
-AWS_SECRET_ACCESS_KEY
-AWS_ENDPOINT_URL_S3
-AWS_REGION
-S3_BUCKET_NAME
-```
-
-### 上传限制没有变化
-
-确认修改的是运行时环境变量：
-
-```env
-UPLOAD_MAX_FILES
-UPLOAD_MAX_FILE_SIZE_MB
-```
-
-修改 `.env.production` 后需要重启容器：
-
-```bash
-docker compose up -d
-```
-
-或：
-
-```bash
 docker restart swift-transfer
 ```

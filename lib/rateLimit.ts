@@ -24,6 +24,10 @@ type RateLimitRow = {
 
 let initialization: Promise<void> | undefined;
 
+function logRateLimitError(operation: string, error: unknown) {
+  console.error(`[rate-limit] ${operation} failed`, error);
+}
+
 async function ensureSchema() {
   if (!initialization) {
     initialization = (async () => {
@@ -96,38 +100,42 @@ export function createRateLimitIdentifier(parts: string[]) {
 }
 
 export async function checkRateLimit(rule: RateLimitRule): Promise<RateLimitCheck> {
-  await ensureSchema();
+  try {
+    await ensureSchema();
 
-  const rows = (await getSql().query(
-    `
-      SELECT window_start, window_seconds, count, blocked_until
-      FROM rate_limit_buckets
-      WHERE scope = $1 AND identifier = $2
-    `,
-    [rule.scope, rule.identifier],
-  )) as RateLimitRow[];
-  const row = rows[0];
+    const rows = (await getSql().query(
+      `
+        SELECT window_start, window_seconds, count, blocked_until
+        FROM rate_limit_buckets
+        WHERE scope = $1 AND identifier = $2
+      `,
+      [rule.scope, rule.identifier],
+    )) as RateLimitRow[];
+    const row = rows[0];
 
-  if (!row) {
-    return { allowed: true, retryAfterSeconds: 0 };
-  }
+    if (!row) {
+      return { allowed: true, retryAfterSeconds: 0 };
+    }
 
-  const blockedRetryAfterSeconds = secondsUntil(row.blocked_until);
-  if (blockedRetryAfterSeconds > 0) {
-    return {
-      allowed: false,
-      retryAfterSeconds: blockedRetryAfterSeconds,
-      rule,
-    };
-  }
+    const blockedRetryAfterSeconds = secondsUntil(row.blocked_until);
+    if (blockedRetryAfterSeconds > 0) {
+      return {
+        allowed: false,
+        retryAfterSeconds: blockedRetryAfterSeconds,
+        rule,
+      };
+    }
 
-  const windowRetryAfter = windowRetryAfterSeconds(row);
-  if (windowRetryAfter > 0 && Number(row.count) >= rule.limit) {
-    return {
-      allowed: false,
-      retryAfterSeconds: windowRetryAfter,
-      rule,
-    };
+    const windowRetryAfter = windowRetryAfterSeconds(row);
+    if (windowRetryAfter > 0 && Number(row.count) >= rule.limit) {
+      return {
+        allowed: false,
+        retryAfterSeconds: windowRetryAfter,
+        rule,
+      };
+    }
+  } catch (error) {
+    logRateLimitError("check", error);
   }
 
   return { allowed: true, retryAfterSeconds: 0 };
@@ -148,89 +156,101 @@ export async function checkRateLimits(
 }
 
 export async function recordRateLimitFailure(rule: RateLimitRule) {
-  await ensureSchema();
+  try {
+    await ensureSchema();
 
-  await getSql().query(
-    `
-      INSERT INTO rate_limit_buckets (
-        scope,
-        identifier,
-        window_start,
-        window_seconds,
-        count,
-        blocked_until,
-        updated_at
-      )
-      VALUES (
-        $1,
-        $2,
-        NOW(),
-        $4,
-        1,
-        CASE
-          WHEN 1 >= $3 THEN NOW() + ($5::int * INTERVAL '1 second')
-          ELSE NULL
-        END,
-        NOW()
-      )
-      ON CONFLICT (scope, identifier) DO UPDATE SET
-        window_start = CASE
-          WHEN rate_limit_buckets.window_start <= NOW() - ($4::int * INTERVAL '1 second')
-            THEN NOW()
-          ELSE rate_limit_buckets.window_start
-        END,
-        window_seconds = $4,
-        count = CASE
-          WHEN rate_limit_buckets.window_start <= NOW() - ($4::int * INTERVAL '1 second')
-            THEN 1
-          ELSE rate_limit_buckets.count + 1
-        END,
-        blocked_until = CASE
-          WHEN (
-            CASE
-              WHEN rate_limit_buckets.window_start <= NOW() - ($4::int * INTERVAL '1 second')
-                THEN 1
-              ELSE rate_limit_buckets.count + 1
-            END
-          ) >= $3
-            THEN NOW() + ($5::int * INTERVAL '1 second')
-          WHEN rate_limit_buckets.blocked_until > NOW()
-            THEN rate_limit_buckets.blocked_until
-          ELSE NULL
-        END,
-        updated_at = NOW()
-    `,
-    [
-      rule.scope,
-      rule.identifier,
-      rule.limit,
-      rule.windowSeconds,
-      rule.blockSeconds,
-    ],
-  );
+    await getSql().query(
+      `
+        INSERT INTO rate_limit_buckets (
+          scope,
+          identifier,
+          window_start,
+          window_seconds,
+          count,
+          blocked_until,
+          updated_at
+        )
+        VALUES (
+          $1,
+          $2,
+          NOW(),
+          $4,
+          1,
+          CASE
+            WHEN 1 >= $3 THEN NOW() + ($5::int * INTERVAL '1 second')
+            ELSE NULL
+          END,
+          NOW()
+        )
+        ON CONFLICT (scope, identifier) DO UPDATE SET
+          window_start = CASE
+            WHEN rate_limit_buckets.window_start <= NOW() - ($4::int * INTERVAL '1 second')
+              THEN NOW()
+            ELSE rate_limit_buckets.window_start
+          END,
+          window_seconds = $4,
+          count = CASE
+            WHEN rate_limit_buckets.window_start <= NOW() - ($4::int * INTERVAL '1 second')
+              THEN 1
+            ELSE rate_limit_buckets.count + 1
+          END,
+          blocked_until = CASE
+            WHEN (
+              CASE
+                WHEN rate_limit_buckets.window_start <= NOW() - ($4::int * INTERVAL '1 second')
+                  THEN 1
+                ELSE rate_limit_buckets.count + 1
+              END
+            ) >= $3
+              THEN NOW() + ($5::int * INTERVAL '1 second')
+            WHEN rate_limit_buckets.blocked_until > NOW()
+              THEN rate_limit_buckets.blocked_until
+            ELSE NULL
+          END,
+          updated_at = NOW()
+      `,
+      [
+        rule.scope,
+        rule.identifier,
+        rule.limit,
+        rule.windowSeconds,
+        rule.blockSeconds,
+      ],
+    );
+  } catch (error) {
+    logRateLimitError("record failure", error);
+  }
 }
 
 export async function recordRateLimitFailures(rules: RateLimitRule[]) {
   await Promise.all(rules.map((rule) => recordRateLimitFailure(rule)));
 
   if (Math.random() < 0.02) {
-    await getSql().query(`
-      DELETE FROM rate_limit_buckets
-      WHERE updated_at < NOW() - INTERVAL '2 days'
-    `);
+    try {
+      await getSql().query(`
+        DELETE FROM rate_limit_buckets
+        WHERE updated_at < NOW() - INTERVAL '2 days'
+      `);
+    } catch (error) {
+      logRateLimitError("cleanup", error);
+    }
   }
 }
 
 export async function clearRateLimit(rule: RateLimitRule) {
-  await ensureSchema();
+  try {
+    await ensureSchema();
 
-  await getSql().query(
-    `
-      DELETE FROM rate_limit_buckets
-      WHERE scope = $1 AND identifier = $2
-    `,
-    [rule.scope, rule.identifier],
-  );
+    await getSql().query(
+      `
+        DELETE FROM rate_limit_buckets
+        WHERE scope = $1 AND identifier = $2
+      `,
+      [rule.scope, rule.identifier],
+    );
+  } catch (error) {
+    logRateLimitError("clear", error);
+  }
 }
 
 export async function clearRateLimits(rules: RateLimitRule[]) {
