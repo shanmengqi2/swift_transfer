@@ -4,6 +4,8 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import { LanguageProvider } from "@/components/i18n-provider";
+import { LanguageToggle } from "@/components/ui/LanguageToggle";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -30,18 +32,21 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
-          <div className="fixed top-4 right-4">
-            <ThemeToggle />
-          </div>
-          {children}
-          <Toaster richColors closeButton />
-        </ThemeProvider>
+        <LanguageProvider>
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="system"
+            enableSystem
+            disableTransitionOnChange
+          >
+            <div className="fixed top-4 right-4 z-50 flex gap-2">
+              <LanguageToggle />
+              <ThemeToggle />
+            </div>
+            {children}
+            <Toaster richColors closeButton />
+          </ThemeProvider>
+        </LanguageProvider>
       </body>
     </html>
   );

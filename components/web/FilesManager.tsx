@@ -31,7 +31,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { useI18n } from "@/components/i18n-provider";
 import type { ManagedFile } from "@/lib/files";
+import {
+  countLabel,
+  formatDateTime,
+  type Language,
+  type TranslationKey,
+} from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 10;
@@ -81,6 +88,12 @@ type RelatedPickupDialogState = {
   isLoading: boolean;
 };
 
+type RelatedPickupCodeStatus = {
+  labelKey: TranslationKey;
+  icon: typeof XCircle;
+  className: string;
+};
+
 type DownloadLink = {
   url: string;
   expiresAt: string;
@@ -88,20 +101,20 @@ type DownloadLink = {
 };
 
 type ExpiryPreset = {
-  label: string;
+  labelKey: TranslationKey;
   minutes: string;
 };
 
 const EXPIRY_PRESETS: ExpiryPreset[] = [
-  { label: "1 hour", minutes: "60" },
-  { label: "1 day", minutes: "1440" },
-  { label: "7 days", minutes: "10080" },
+  { labelKey: "time.hour1", minutes: "60" },
+  { labelKey: "time.day1", minutes: "1440" },
+  { labelKey: "time.day7", minutes: "10080" },
 ];
 
 const PICKUP_EXPIRY_PRESETS: ExpiryPreset[] = [
-  { label: "1 day", minutes: "1440" },
-  { label: "7 days", minutes: "10080" },
-  { label: "30 days", minutes: "43200" },
+  { labelKey: "time.day1", minutes: "1440" },
+  { labelKey: "time.day7", minutes: "10080" },
+  { labelKey: "time.day30", minutes: "43200" },
 ];
 
 function formatBytes(bytes: number) {
@@ -120,15 +133,12 @@ function formatBytes(bytes: number) {
   }`;
 }
 
-function formatDate(value: string | null) {
+function formatDate(value: string | null, language: Language) {
   if (!value) {
     return "-";
   }
 
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+  return formatDateTime(value, language);
 }
 
 function sortValue(file: ManagedFile, key: SortKey) {
@@ -149,41 +159,45 @@ function isExpired(value: string | null) {
 function getPickupCodeStatus(pickupCode: RelatedPickupCode) {
   if (pickupCode.revokedAt) {
     return {
-      label: "Revoked",
+      labelKey: "common.revoked",
       icon: XCircle,
       className: "text-destructive",
-    };
+    } satisfies RelatedPickupCodeStatus;
   }
 
   if (!pickupCode.expiresAt) {
     return {
-      label: "Permanent",
+      labelKey: "common.permanent",
       icon: InfinityIcon,
       className: "text-foreground",
-    };
+    } satisfies RelatedPickupCodeStatus;
   }
 
   if (isExpired(pickupCode.expiresAt)) {
     return {
-      label: "Expired",
+      labelKey: "common.expired",
       icon: XCircle,
       className: "text-destructive",
-    };
+    } satisfies RelatedPickupCodeStatus;
   }
 
   return {
-    label: "Active",
+    labelKey: "common.active",
     icon: CheckCircle2,
     className: "text-foreground",
-  };
+  } satisfies RelatedPickupCodeStatus;
 }
 
-async function copyToClipboard(text: string) {
+async function copyToClipboard(
+  text: string,
+  successMessage: string,
+  failedMessage: string,
+) {
   try {
     await navigator.clipboard.writeText(text);
-    toast.success("Link copied");
+    toast.success(successMessage);
   } catch {
-    toast.error("Failed to copy link");
+    toast.error(failedMessage);
   }
 }
 
@@ -207,6 +221,7 @@ export function FilesManager() {
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(
     null,
   );
+  const { language, t } = useI18n();
 
   const fetchFiles = useCallback(async () => {
     const response = await fetch("/api/s3/files", { cache: "no-store" });
@@ -229,7 +244,7 @@ export function FilesManager() {
       })
       .catch(() => {
         if (!ignore) {
-          toast.error("Failed to load files");
+          toast.error(t("files.failedLoad"));
         }
       })
       .finally(() => {
@@ -241,7 +256,7 @@ export function FilesManager() {
     return () => {
       ignore = true;
     };
-  }, [fetchFiles]);
+  }, [fetchFiles, t]);
 
   const refreshFiles = async () => {
     setIsRefreshing(true);
@@ -252,7 +267,7 @@ export function FilesManager() {
       setSelectedKeys(new Set());
       setPage(1);
     } catch {
-      toast.error("Failed to load files");
+      toast.error(t("files.failedLoad"));
     } finally {
       setIsRefreshing(false);
     }
@@ -358,7 +373,7 @@ export function FilesManager() {
         isLoading: false,
       });
     } catch {
-      toast.error("Failed to load pickup codes");
+      toast.error(t("files.failedLoadPickupCodes"));
       setRelatedPickupDialog((currentDialog) =>
         currentDialog ? { ...currentDialog, isLoading: false } : null,
       );
@@ -404,7 +419,7 @@ export function FilesManager() {
       expiresInMinutes < 1 ||
       expiresInMinutes > 10080
     ) {
-      toast.error("Valid time must be between 1 minute and 7 days");
+      toast.error(t("files.validLinkTime"));
       return;
     }
 
@@ -442,9 +457,9 @@ export function FilesManager() {
         expiresInMinutes: linkDialog.expiresInMinutes,
         isGenerating: false,
       });
-      toast.success("Download link generated");
+      toast.success(t("files.generatedLink"));
     } catch {
-      toast.error("Failed to generate download link");
+      toast.error(t("files.failedGenerateLink"));
       setLinkDialog((currentDialog) =>
         currentDialog ? { ...currentDialog, isGenerating: false } : null,
       );
@@ -461,7 +476,7 @@ export function FilesManager() {
       !pickupDialog.neverExpires &&
       (!Number.isFinite(expiresInMinutes) || expiresInMinutes < 1)
     ) {
-      toast.error("Valid time must be at least 1 minute");
+      toast.error(t("files.validPickupTime"));
       return;
     }
 
@@ -509,9 +524,9 @@ export function FilesManager() {
         isCreating: false,
         pickupCode: data.pickupCode,
       });
-      toast.success("Pickup code created");
+      toast.success(t("files.createdPickupCode"));
     } catch {
-      toast.error("Failed to create pickup code");
+      toast.error(t("files.failedCreatePickupCode"));
       setPickupDialog((currentDialog) =>
         currentDialog ? { ...currentDialog, isCreating: false } : null,
       );
@@ -560,10 +575,12 @@ export function FilesManager() {
       );
       setDeleteDialog(null);
       toast.success(
-        deleteDialog.files.length === 1 ? "File deleted" : "Files deleted",
+        deleteDialog.files.length === 1
+          ? t("files.deleted")
+          : t("files.deletedPlural"),
       );
     } catch {
-      toast.error("Failed to delete files");
+      toast.error(t("files.failedDelete"));
       setDeleteDialog((currentDialog) =>
         currentDialog ? { ...currentDialog, isDeleting: false } : null,
       );
@@ -588,9 +605,12 @@ export function FilesManager() {
         <CardContent className="p-0">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
             <div>
-              <p className="text-sm font-medium">Object storage files</p>
+              <p className="text-sm font-medium">{t("files.cardTitle")}</p>
               <p className="text-xs text-muted-foreground">
-                {filteredFiles.length} of {files.length} files
+                {t("files.countSummary", {
+                  filtered: filteredFiles.length,
+                  total: files.length,
+                })}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -598,7 +618,7 @@ export function FilesManager() {
                 <>
                   <Button onClick={openPickupDialog}>
                     <KeyRound className="size-4" />
-                    Create pickup code
+                    {t("files.createPickupCode")}
                   </Button>
                   <Button
                     variant="destructive"
@@ -610,7 +630,7 @@ export function FilesManager() {
                     }
                   >
                     <Trash2 className="size-4" />
-                    Delete selected
+                    {t("files.deleteSelected")}
                   </Button>
                 </>
               )}
@@ -624,7 +644,7 @@ export function FilesManager() {
                 ) : (
                   <RefreshCw className="size-4" />
                 )}
-                Refresh
+                {t("common.refresh")}
               </Button>
             </div>
           </div>
@@ -640,7 +660,7 @@ export function FilesManager() {
                   setSelectedKeys(new Set());
                   setPage(1);
                 }}
-                placeholder="Search by file name"
+                placeholder={t("files.searchPlaceholder")}
                 className="h-9 w-full rounded-lg border bg-background pr-9 pl-9 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
               />
               {searchQuery && (
@@ -652,7 +672,7 @@ export function FilesManager() {
                     setSelectedKeys(new Set());
                     setPage(1);
                   }}
-                  aria-label="Clear search"
+                  aria-label={t("files.clearSearch")}
                 >
                   <X className="size-3.5" />
                 </button>
@@ -660,7 +680,7 @@ export function FilesManager() {
             </label>
             {selectedFiles.length > 0 && (
               <p className="text-xs text-muted-foreground">
-                {selectedFiles.length} selected
+                {t("files.selected", { count: selectedFiles.length })}
               </p>
             )}
           </div>
@@ -677,29 +697,33 @@ export function FilesManager() {
                         partiallySelected ? "mixed" : allCurrentPageSelected
                       }
                       onChange={toggleCurrentPageSelection}
-                      aria-label="Select current page"
+                      aria-label={t("files.selectCurrentPage")}
                       className="size-4 rounded border-border accent-primary"
                     />
                   </th>
-                  <th className="w-44 px-4 py-3 font-medium">Bucket</th>
+                  <th className="w-44 px-4 py-3 font-medium">
+                    {t("files.bucket")}
+                  </th>
                   <th className="w-72 px-4 py-3 font-medium">
                     <button
                       type="button"
                       className="flex items-center gap-1.5"
                       onClick={() => changeSort("fileName")}
                     >
-                      File name
+                      {t("files.fileName")}
                       {renderSortIcon("fileName")}
                     </button>
                   </th>
-                  <th className="w-28 px-4 py-3 font-medium">Size</th>
+                  <th className="w-28 px-4 py-3 font-medium">
+                    {t("files.size")}
+                  </th>
                   <th className="w-44 px-4 py-3 font-medium">
                     <button
                       type="button"
                       className="flex items-center gap-1.5"
                       onClick={() => changeSort("lastModified")}
                     >
-                      Uploaded
+                      {t("files.uploaded")}
                       {renderSortIcon("lastModified")}
                     </button>
                   </th>
@@ -709,12 +733,12 @@ export function FilesManager() {
                       className="flex items-center gap-1.5"
                       onClick={() => changeSort("presignedUrlExpiresAt")}
                     >
-                      Link expires
+                      {t("files.linkExpires")}
                       {renderSortIcon("presignedUrlExpiresAt")}
                     </button>
                   </th>
                   <th className="w-20 px-4 py-3 text-right font-medium">
-                    Actions
+                    {t("files.actions")}
                   </th>
                 </tr>
               </thead>
@@ -724,7 +748,7 @@ export function FilesManager() {
                     <td colSpan={7} className="px-4 py-12 text-center">
                       <div className="flex items-center justify-center gap-2 text-muted-foreground">
                         <Loader2 className="size-4 animate-spin" />
-                        Loading files
+                        {t("files.loading")}
                       </div>
                     </td>
                   </tr>
@@ -734,7 +758,7 @@ export function FilesManager() {
                       colSpan={7}
                       className="px-4 py-12 text-center text-muted-foreground"
                     >
-                      No files found.
+                      {t("files.empty")}
                     </td>
                   </tr>
                 ) : (
@@ -748,7 +772,9 @@ export function FilesManager() {
                             type="checkbox"
                             checked={selectedKeys.has(file.key)}
                             onChange={() => toggleFileSelection(file.key)}
-                            aria-label={`Select ${file.fileName}`}
+                            aria-label={t("files.selectFile", {
+                              fileName: file.fileName,
+                            })}
                             className="size-4 rounded border-border accent-primary"
                           />
                         </td>
@@ -765,8 +791,11 @@ export function FilesManager() {
                           {(file.pickupCodeCount ?? 0) > 0 && (
                             <div className="mt-1 inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
                               <KeyRound className="size-3" />
-                              Shared by {file.pickupCodeCount} pickup code
-                              {file.pickupCodeCount === 1 ? "" : "s"}
+                              {t("files.sharedBy", {
+                                count: file.pickupCodeCount ?? 0,
+                                plural:
+                                  (file.pickupCodeCount ?? 0) === 1 ? "" : "s",
+                              })}
                             </div>
                           )}
                         </td>
@@ -774,7 +803,7 @@ export function FilesManager() {
                           {formatBytes(file.size)}
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">
-                          {formatDate(file.lastModified)}
+                          {formatDate(file.lastModified, language)}
                         </td>
                         <td className="px-4 py-3">
                           {file.presignedUrlExpiresAt ? (
@@ -785,10 +814,15 @@ export function FilesManager() {
                               )}
                             >
                               <div>
-                                {formatDate(file.presignedUrlExpiresAt)}
+                                {formatDate(
+                                  file.presignedUrlExpiresAt,
+                                  language,
+                                )}
                               </div>
                               {expired && (
-                                <div className="text-xs">Expired</div>
+                                <div className="text-xs">
+                                  {t("common.expired")}
+                                </div>
                               )}
                             </div>
                           ) : (
@@ -800,7 +834,9 @@ export function FilesManager() {
                             <DropdownMenuTrigger asChild>
                               <Button variant="ghost" size="icon">
                                 <MoreHorizontal className="size-4" />
-                                <span className="sr-only">Open menu</span>
+                                <span className="sr-only">
+                                  {t("files.openMenu")}
+                                </span>
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-44">
@@ -808,7 +844,7 @@ export function FilesManager() {
                                 onSelect={() => openLinkDialog(file)}
                               >
                                 <Download className="size-4" />
-                                Download link
+                                {t("files.downloadLink")}
                               </DropdownMenuItem>
                               {(file.pickupCodeCount ?? 0) > 0 && (
                                 <DropdownMenuItem
@@ -817,7 +853,7 @@ export function FilesManager() {
                                   }
                                 >
                                   <KeyRound className="size-4" />
-                                  View pickup codes
+                                  {t("files.viewPickupCodes")}
                                 </DropdownMenuItem>
                               )}
                               <DropdownMenuItem
@@ -830,7 +866,7 @@ export function FilesManager() {
                                 }
                               >
                                 <Trash2 className="size-4" />
-                                Delete
+                                {t("common.delete")}
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -845,7 +881,10 @@ export function FilesManager() {
 
           <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
             <p className="text-xs text-muted-foreground">
-              Page {currentPage} of {totalPages}
+              {t("files.pageSummary", {
+                current: currentPage,
+                total: totalPages,
+              })}
             </p>
             <div className="flex gap-2">
               <Button
@@ -853,7 +892,7 @@ export function FilesManager() {
                 onClick={() => setPage((current) => Math.max(1, current - 1))}
                 disabled={currentPage === 1}
               >
-                Previous
+                {t("files.previous")}
               </Button>
               <Button
                 variant="outline"
@@ -862,7 +901,7 @@ export function FilesManager() {
                 }
                 disabled={currentPage === totalPages}
               >
-                Next
+                {t("files.next")}
               </Button>
             </div>
           </div>
@@ -881,10 +920,10 @@ export function FilesManager() {
           <Dialog.Overlay className="fixed inset-0 z-50 bg-black/45" />
           <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-5 shadow-lg">
             <Dialog.Title className="text-lg font-semibold">
-              Download link
+              {t("files.downloadLink")}
             </Dialog.Title>
             <Dialog.Description className="mt-2 text-sm text-muted-foreground">
-              Generate a presigned URL for this file. S3 allows up to 7 days.
+              {t("files.downloadDescription")}
             </Dialog.Description>
 
             {linkDialog && (
@@ -899,7 +938,7 @@ export function FilesManager() {
                 </div>
 
                 <label className="flex flex-col gap-1 text-sm font-medium">
-                  Valid for minutes
+                  {t("files.validForMinutes")}
                   <div className="mb-1 flex flex-wrap gap-2">
                     {EXPIRY_PRESETS.map((preset) => (
                       <Button
@@ -918,7 +957,7 @@ export function FilesManager() {
                           })
                         }
                       >
-                        {preset.label}
+                        {t(preset.labelKey)}
                       </Button>
                     ))}
                   </div>
@@ -942,7 +981,7 @@ export function FilesManager() {
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-sm font-medium">
-                        Existing generated link
+                        {t("files.existingLink")}
                       </p>
                       <Button
                         variant="outline"
@@ -950,11 +989,13 @@ export function FilesManager() {
                         onClick={() =>
                           void copyToClipboard(
                             linkDialog.file.presignedUrl as string,
+                            t("files.linkCopied"),
+                            t("files.failedCopyLink"),
                           )
                         }
                       >
                         <Copy className="size-4" />
-                        Copy
+                        {t("common.copy")}
                       </Button>
                     </div>
                     <textarea
@@ -963,15 +1004,19 @@ export function FilesManager() {
                       className="min-h-24 resize-none rounded-lg border bg-background p-3 text-xs outline-none"
                     />
                     <p className="text-xs text-muted-foreground">
-                      Expires{" "}
-                      {formatDate(linkDialog.file.presignedUrlExpiresAt)}
+                      {t("files.expires", {
+                        date: formatDate(
+                          linkDialog.file.presignedUrlExpiresAt,
+                          language,
+                        ),
+                      })}
                     </p>
                   </div>
                 )}
 
                 <div className="flex justify-end gap-2">
                   <Dialog.Close asChild>
-                    <Button variant="outline">Close</Button>
+                    <Button variant="outline">{t("common.close")}</Button>
                   </Dialog.Close>
                   <Button
                     onClick={() => void generateDownloadLink()}
@@ -987,7 +1032,7 @@ export function FilesManager() {
                     ) : (
                       <Download className="size-4" />
                     )}
-                    Generate new link
+                    {t("files.generateNewLink")}
                   </Button>
                 </div>
               </div>
@@ -1008,10 +1053,10 @@ export function FilesManager() {
           <Dialog.Overlay className="fixed inset-0 z-50 bg-black/45" />
           <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-5 shadow-lg">
             <Dialog.Title className="text-lg font-semibold">
-              Pickup code
+              {t("files.pickupCode")}
             </Dialog.Title>
             <Dialog.Description className="mt-2 text-sm text-muted-foreground">
-              Create a 6-character code for the selected files.
+              {t("files.pickupDescription")}
             </Dialog.Description>
 
             {pickupDialog && (
@@ -1027,7 +1072,7 @@ export function FilesManager() {
                 {!pickupDialog.pickupCode ? (
                   <>
                     <label className="flex flex-col gap-1 text-sm font-medium">
-                      Valid for minutes
+                      {t("files.validForMinutes")}
                       <div className="mb-1 flex flex-wrap gap-2">
                         {PICKUP_EXPIRY_PRESETS.map((preset) => (
                           <Button
@@ -1048,7 +1093,7 @@ export function FilesManager() {
                               })
                             }
                           >
-                            {preset.label}
+                            {t(preset.labelKey)}
                           </Button>
                         ))}
                       </div>
@@ -1085,33 +1130,42 @@ export function FilesManager() {
                         }
                         className="size-4 rounded border-border accent-primary"
                       />
-                      Never expire
+                      {t("files.neverExpire")}
                     </label>
                   </>
                 ) : (
                   <div className="flex flex-col gap-3 rounded-md border p-3">
                     <div>
-                      <p className="text-sm font-medium">Generated code</p>
+                      <p className="text-sm font-medium">
+                        {t("files.generatedCode")}
+                      </p>
                       <p className="mt-1 font-mono text-3xl font-semibold tracking-normal">
                         {pickupDialog.pickupCode.code}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {pickupDialog.pickupCode.expiresAt
-                          ? `Expires ${formatDate(
-                              pickupDialog.pickupCode.expiresAt,
-                            )}`
-                          : "Never expires"}
+                          ? t("files.expires", {
+                              date: formatDate(
+                                pickupDialog.pickupCode.expiresAt,
+                                language,
+                              ),
+                            })
+                          : t("common.neverExpires")}
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Button
                         variant="outline"
                         onClick={() =>
-                          void copyToClipboard(pickupDialog.pickupCode!.code)
+                          void copyToClipboard(
+                            pickupDialog.pickupCode!.code,
+                            t("files.linkCopied"),
+                            t("detail.failedCopy"),
+                          )
                         }
                       >
                         <Copy className="size-4" />
-                        Copy code
+                        {t("files.copyCode")}
                       </Button>
                       <Button
                         variant="outline"
@@ -1120,11 +1174,13 @@ export function FilesManager() {
                             `${window.location.origin}/pickup?code=${encodeURIComponent(
                               pickupDialog.pickupCode!.code,
                             )}`,
+                            t("pickup.linkCopied"),
+                            t("detail.failedCopy"),
                           )
                         }
                       >
                         <Copy className="size-4" />
-                        Copy pickup link
+                        {t("files.copyPickupLink")}
                       </Button>
                     </div>
                   </div>
@@ -1132,7 +1188,7 @@ export function FilesManager() {
 
                 <div className="flex justify-end gap-2">
                   <Dialog.Close asChild>
-                    <Button variant="outline">Close</Button>
+                    <Button variant="outline">{t("common.close")}</Button>
                   </Dialog.Close>
                   {!pickupDialog.pickupCode && (
                     <Button
@@ -1151,7 +1207,7 @@ export function FilesManager() {
                       ) : (
                         <KeyRound className="size-4" />
                       )}
-                      Create code
+                      {t("files.createCode")}
                     </Button>
                   )}
                 </div>
@@ -1174,10 +1230,10 @@ export function FilesManager() {
           <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-2xl -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border bg-background shadow-lg">
             <div className="border-b p-5">
               <Dialog.Title className="text-lg font-semibold">
-                Related pickup codes
+                {t("files.relatedTitle")}
               </Dialog.Title>
               <Dialog.Description className="mt-2 text-sm text-muted-foreground">
-                Pickup codes that include this file.
+                {t("files.relatedDescription")}
               </Dialog.Description>
               {relatedPickupDialog && (
                 <div className="mt-3 rounded-md bg-muted px-3 py-2">
@@ -1195,11 +1251,11 @@ export function FilesManager() {
               {relatedPickupDialog?.isLoading ? (
                 <div className="flex items-center justify-center gap-2 px-4 py-12 text-muted-foreground">
                   <Loader2 className="size-4 animate-spin" />
-                  Loading pickup codes
+                  {t("files.relatedLoading")}
                 </div>
               ) : relatedPickupDialog?.pickupCodes.length === 0 ? (
                 <div className="px-4 py-12 text-center text-sm text-muted-foreground">
-                  No pickup codes include this file.
+                  {t("files.relatedEmpty")}
                 </div>
               ) : (
                 <div className="divide-y">
@@ -1224,15 +1280,21 @@ export function FilesManager() {
                               )}
                             >
                               <StatusIcon className="size-3.5" />
-                              {status.label}
+                              {t(status.labelKey)}
                             </span>
                           </div>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            {pickupCode.fileCount} file
-                            {pickupCode.fileCount === 1 ? "" : "s"} · expires{" "}
+                            {countLabel(
+                              language,
+                              pickupCode.fileCount,
+                              "file",
+                              "files",
+                              "个文件",
+                            )}{" "}
+                            · {t("pickup.expires").toLocaleLowerCase()}{" "}
                             {pickupCode.expiresAt
-                              ? formatDate(pickupCode.expiresAt)
-                              : "never"}
+                              ? formatDate(pickupCode.expiresAt, language)
+                              : t("common.never")}
                           </p>
                         </div>
                         <div className="flex flex-wrap gap-2 sm:justify-end">
@@ -1244,16 +1306,18 @@ export function FilesManager() {
                                 `${window.location.origin}/pickup?code=${encodeURIComponent(
                                   pickupCode.code,
                                 )}`,
+                                t("pickup.linkCopied"),
+                                t("detail.failedCopy"),
                               )
                             }
                           >
                             <Copy className="size-4" />
-                            Copy link
+                            {t("files.copyPickupLink")}
                           </Button>
                           <Button asChild variant="outline" size="sm">
                             <Link href={`/pickup-codes/${pickupCode.id}`}>
                               <ExternalLink className="size-4" />
-                              Details
+                              {t("files.openPickupDetail")}
                             </Link>
                           </Button>
                         </div>
@@ -1266,7 +1330,7 @@ export function FilesManager() {
 
             <div className="flex justify-end border-t p-4">
               <Dialog.Close asChild>
-                <Button variant="outline">Close</Button>
+                <Button variant="outline">{t("common.close")}</Button>
               </Dialog.Close>
             </div>
           </Dialog.Content>
@@ -1285,11 +1349,14 @@ export function FilesManager() {
           <AlertDialog.Overlay className="fixed inset-0 z-50 bg-black/45" />
           <AlertDialog.Content className="fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-5 shadow-lg">
             <AlertDialog.Title className="text-lg font-semibold">
-              Delete this file?
+              {deleteDialog?.files.length === 1
+                ? t("files.deleteSingleTitle")
+                : t("files.deleteTitle")}
             </AlertDialog.Title>
             <AlertDialog.Description className="mt-2 text-sm text-muted-foreground">
-              This will permanently remove the object from S3 and clear its
-              saved download link.
+              {deleteDialog?.files.length === 1
+                ? t("files.deleteSingleDescription")
+                : t("files.deleteDescription")}
             </AlertDialog.Description>
 
             {deleteDialog && (
@@ -1300,8 +1367,7 @@ export function FilesManager() {
                   <div className="mt-3 flex gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                     <AlertTriangle className="mt-0.5 size-4 shrink-0" />
                     <p>
-                      Some selected files are included in active pickup codes.
-                      If deleted, pickup visitors will see them as missing.
+                      {t("files.deletePickupWarning")}
                     </p>
                   </div>
                 )}
@@ -1310,9 +1376,13 @@ export function FilesManager() {
                     <p key={file.key} className="truncate">
                       {file.fileName}
                       {(file.pickupCodeCount ?? 0) > 0
-                        ? ` (${file.pickupCodeCount} pickup code${
-                            file.pickupCodeCount === 1 ? "" : "s"
-                          })`
+                        ? ` (${countLabel(
+                            language,
+                            file.pickupCodeCount ?? 0,
+                            "pickup code",
+                            "pickup codes",
+                            "个取件码",
+                          )})`
                         : ""}
                     </p>
                   ))}
@@ -1323,7 +1393,7 @@ export function FilesManager() {
             <div className="mt-5 flex justify-end gap-2">
               <AlertDialog.Cancel asChild>
                 <Button variant="outline" disabled={deleteDialog?.isDeleting}>
-                  Keep
+                  {t("common.keep")}
                 </Button>
               </AlertDialog.Cancel>
               <AlertDialog.Action asChild>
@@ -1340,7 +1410,7 @@ export function FilesManager() {
                   ) : (
                     <Trash2 className="size-4" />
                   )}
-                  Delete
+                  {t("common.delete")}
                 </Button>
               </AlertDialog.Action>
             </div>

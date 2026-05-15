@@ -19,6 +19,13 @@ import { AlertDialog, Dialog } from "radix-ui";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { useI18n } from "@/components/i18n-provider";
+import {
+  countLabel,
+  formatDateTime,
+  type Language,
+  type TranslationKey,
+} from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 type PickupFile = {
@@ -70,15 +77,14 @@ function formatBytes(bytes: number | null) {
   }`;
 }
 
-function formatDate(value: string | null) {
-  if (!value) {
-    return "Never";
-  }
+type StatusInfo = {
+  labelKey: TranslationKey;
+  icon: typeof XCircle;
+  className: string;
+};
 
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+function formatDate(value: string | null, language: Language) {
+  return formatDateTime(value, language);
 }
 
 function toLocalDateTimeInput(value: string | null) {
@@ -98,41 +104,45 @@ function fromLocalDateTimeInput(value: string) {
 function getStatus(pickupCode: PickupCodeDetailData) {
   if (pickupCode.revokedAt) {
     return {
-      label: "Revoked",
+      labelKey: "common.revoked",
       icon: XCircle,
       className: "text-destructive",
-    };
+    } satisfies StatusInfo;
   }
 
   if (!pickupCode.expiresAt) {
     return {
-      label: "Permanent",
+      labelKey: "common.permanent",
       icon: Infinity,
       className: "text-foreground",
-    };
+    } satisfies StatusInfo;
   }
 
   if (new Date(pickupCode.expiresAt).getTime() <= Date.now()) {
     return {
-      label: "Expired",
+      labelKey: "common.expired",
       icon: XCircle,
       className: "text-destructive",
-    };
+    } satisfies StatusInfo;
   }
 
   return {
-    label: "Active",
+    labelKey: "common.active",
     icon: CheckCircle2,
     className: "text-foreground",
-  };
+  } satisfies StatusInfo;
 }
 
-async function copyToClipboard(text: string, message: string) {
+async function copyToClipboard(
+  text: string,
+  message: string,
+  failedMessage: string,
+) {
   try {
     await navigator.clipboard.writeText(text);
     toast.success(message);
   } catch {
-    toast.error("Failed to copy");
+    toast.error(failedMessage);
   }
 }
 
@@ -155,6 +165,7 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
     new Set(),
   );
   const [removingKey, setRemovingKey] = useState<string | null>(null);
+  const { language, t } = useI18n();
 
   const fetchPickupCode = useCallback(async () => {
     const response = await fetch(`/api/pickup-codes/${id}`, {
@@ -184,7 +195,7 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
       })
       .catch(() => {
         if (!ignore) {
-          toast.error("Failed to load pickup code");
+          toast.error(t("detail.failedLoadPickupCode"));
         }
       })
       .finally(() => {
@@ -196,7 +207,7 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
     return () => {
       ignore = true;
     };
-  }, [fetchPickupCode]);
+  }, [fetchPickupCode, t]);
 
   const totalSize = useMemo(() => {
     if (!pickupCode) {
@@ -251,7 +262,7 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
       const data = (await response.json()) as { files: StorageFile[] };
       setStorageFiles(data.files);
     } catch {
-      toast.error("Failed to load files");
+      toast.error(t("files.failedLoad"));
     } finally {
       setIsLoadingStorageFiles(false);
     }
@@ -263,7 +274,7 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
     }
 
     if (!neverExpires && !expiresAtInput) {
-      toast.error("Choose an expiration time or select never expires");
+      toast.error(t("detail.chooseExpiration"));
       return;
     }
 
@@ -298,9 +309,9 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
             }
           : current,
       );
-      toast.success("Expiration updated");
+      toast.success(t("detail.expirationUpdated"));
     } catch {
-      toast.error("Failed to update expiration");
+      toast.error(t("detail.failedUpdateExpiration"));
     } finally {
       setIsSaving(false);
     }
@@ -337,9 +348,9 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
           : current,
       );
       setRevokeDialogOpen(false);
-      toast.success("Pickup code revoked");
+      toast.success(t("detail.revoked"));
     } catch {
-      toast.error("Failed to revoke pickup code");
+      toast.error(t("detail.failedRevoke"));
     } finally {
       setIsRevoking(false);
     }
@@ -395,10 +406,12 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
       setSelectedAddKeys(new Set());
       setAddDialogOpen(false);
       toast.success(
-        selectedFiles.length === 1 ? "File added" : "Files added",
+        selectedFiles.length === 1
+          ? t("detail.fileAdded")
+          : t("detail.filesAdded"),
       );
     } catch {
-      toast.error("Failed to add files");
+      toast.error(t("detail.failedAddFiles"));
     } finally {
       setIsAddingFiles(false);
     }
@@ -429,9 +442,9 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
         pickupCode: PickupCodeDetailData;
       };
       setPickupCode(data.pickupCode);
-      toast.success("File removed from pickup code");
+      toast.success(t("detail.fileRemoved"));
     } catch {
-      toast.error("Failed to remove file");
+      toast.error(t("detail.failedRemoveFile"));
     } finally {
       setRemovingKey(null);
     }
@@ -443,7 +456,7 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
         <CardContent className="p-12">
           <div className="flex items-center justify-center gap-2 text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
-            Loading pickup code
+            {t("detail.loading")}
           </div>
         </CardContent>
       </Card>
@@ -454,7 +467,7 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
     return (
       <Card className="w-full">
         <CardContent className="p-12 text-center text-muted-foreground">
-          Pickup code not found.
+          {t("detail.notFound")}
         </CardContent>
       </Card>
     );
@@ -475,7 +488,7 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
         <Button asChild variant="outline">
           <Link href="/pickup-codes">
             <ArrowLeft className="size-4" />
-            Back
+            {t("common.back")}
           </Link>
         </Button>
       </div>
@@ -494,14 +507,20 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
                       "flex items-center gap-1.5 text-sm",
                       status.className,
                     )}
-                  >
-                    <StatusIcon className="size-4" />
-                    {status.label}
+                    >
+                      <StatusIcon className="size-4" />
+                    {t(status.labelKey)}
                   </div>
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {pickupCode.files.length} file
-                  {pickupCode.files.length === 1 ? "" : "s"} ·{" "}
+                  {countLabel(
+                    language,
+                    pickupCode.files.length,
+                    "file",
+                    "files",
+                    "个文件",
+                  )}{" "}
+                  ·{" "}
                   {formatBytes(totalSize)}
                 </p>
               </div>
@@ -509,18 +528,22 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
                 <Button
                   variant="outline"
                   onClick={() =>
-                    void copyToClipboard(pickupLink, "Link copied")
+                    void copyToClipboard(
+                      pickupLink,
+                      t("detail.linkCopied"),
+                      t("detail.failedCopy"),
+                    )
                   }
                 >
                   <Copy className="size-4" />
-                  Copy pickup link
+                  {t("detail.copyPickupLink")}
                 </Button>
                 <Button
                   onClick={() => void openAddDialog()}
                   disabled={Boolean(pickupCode.revokedAt)}
                 >
                   <Plus className="size-4" />
-                  Add files
+                  {t("detail.addFiles")}
                 </Button>
               </div>
             </div>
@@ -528,7 +551,7 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
             <div className="divide-y">
               {pickupCode.files.length === 0 ? (
                 <div className="px-4 py-12 text-center text-sm text-muted-foreground">
-                  No files in this pickup code.
+                  {t("detail.noFiles")}
                 </div>
               ) : (
                 pickupCode.files.map((file) => (
@@ -550,12 +573,12 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
                     <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                       {file.exists ? (
                         <span className="text-sm text-muted-foreground">
-                          Available
+                          {t("common.available")}
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 rounded-md bg-destructive/10 px-2 py-1 text-sm text-destructive">
                           <AlertTriangle className="size-4" />
-                          File missing
+                          {t("common.fileMissing")}
                         </span>
                       )}
                       <Button
@@ -572,7 +595,7 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
                         ) : (
                           <Trash2 className="size-4" />
                         )}
-                        Remove
+                        {t("common.remove")}
                       </Button>
                     </div>
                   </div>
@@ -586,9 +609,11 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
           <Card>
             <CardContent className="flex flex-col gap-4 p-4">
               <div>
-                <p className="text-sm font-medium">Expiration</p>
+                <p className="text-sm font-medium">{t("detail.expiration")}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Current: {formatDate(pickupCode.expiresAt)}
+                  {t("detail.current", {
+                    date: formatDate(pickupCode.expiresAt, language),
+                  })}
                 </p>
               </div>
 
@@ -600,7 +625,7 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
                   disabled={Boolean(pickupCode.revokedAt)}
                   className="size-4 rounded border-border accent-primary"
                 />
-                Never expires
+                {t("common.neverExpires")}
               </label>
 
               <input
@@ -620,7 +645,7 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
                 ) : (
                   <Save className="size-4" />
                 )}
-                Save expiration
+                {t("detail.saveExpiration")}
               </Button>
             </CardContent>
           </Card>
@@ -628,16 +653,22 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
           <Card>
             <CardContent className="flex flex-col gap-3 p-4">
               <div>
-                <p className="text-sm font-medium">Metadata</p>
+                <p className="text-sm font-medium">{t("detail.metadata")}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Created {formatDate(pickupCode.createdAt)}
+                  {t("detail.created", {
+                    date: formatDate(pickupCode.createdAt, language),
+                  })}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Updated {formatDate(pickupCode.updatedAt)}
+                  {t("detail.updated", {
+                    date: formatDate(pickupCode.updatedAt, language),
+                  })}
                 </p>
                 {pickupCode.revokedAt && (
                   <p className="mt-1 text-xs text-destructive">
-                    Revoked {formatDate(pickupCode.revokedAt)}
+                    {t("detail.revokedAt", {
+                      date: formatDate(pickupCode.revokedAt, language),
+                    })}
                   </p>
                 )}
               </div>
@@ -647,10 +678,9 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
           <Card>
             <CardContent className="flex flex-col gap-3 p-4">
               <div>
-                <p className="text-sm font-medium">Revoke code</p>
+                <p className="text-sm font-medium">{t("detail.revokeCode")}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Revoked pickup codes can no longer be used on the public
-                  pickup page.
+                  {t("detail.revokeDescription")}
                 </p>
               </div>
               <Button
@@ -659,7 +689,7 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
                 disabled={Boolean(pickupCode.revokedAt)}
               >
                 <Trash2 className="size-4" />
-                Revoke
+                {t("detail.revoke")}
               </Button>
             </CardContent>
           </Card>
@@ -674,17 +704,15 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
           <AlertDialog.Overlay className="fixed inset-0 z-50 bg-black/45" />
           <AlertDialog.Content className="fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-5 shadow-lg">
             <AlertDialog.Title className="text-lg font-semibold">
-              Revoke this pickup code?
+              {t("detail.revokeTitle")}
             </AlertDialog.Title>
             <AlertDialog.Description className="mt-2 text-sm text-muted-foreground">
-              The public pickup page will stop accepting this code. Any
-              presigned download URLs already copied may remain valid until
-              their own expiration.
+              {t("detail.revokeConfirm")}
             </AlertDialog.Description>
             <div className="mt-5 flex justify-end gap-2">
               <AlertDialog.Cancel asChild>
                 <Button variant="outline" disabled={isRevoking}>
-                  Keep
+                  {t("common.keep")}
                 </Button>
               </AlertDialog.Cancel>
               <AlertDialog.Action asChild>
@@ -701,7 +729,7 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
                   ) : (
                     <Trash2 className="size-4" />
                   )}
-                  Revoke
+                  {t("detail.revoke")}
                 </Button>
               </AlertDialog.Action>
             </div>
@@ -715,11 +743,10 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
           <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-2xl -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border bg-background shadow-lg">
             <div className="border-b p-5">
               <Dialog.Title className="text-lg font-semibold">
-                Add files
+                {t("detail.addFiles")}
               </Dialog.Title>
               <Dialog.Description className="mt-2 text-sm text-muted-foreground">
-                Select existing object storage files to include in this pickup
-                code.
+                {t("detail.addFilesDescription")}
               </Dialog.Description>
             </div>
 
@@ -730,7 +757,7 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
                   type="search"
                   value={addSearchQuery}
                   onChange={(event) => setAddSearchQuery(event.target.value)}
-                  placeholder="Search files"
+                  placeholder={t("detail.searchFiles")}
                   className="h-9 w-full rounded-lg border bg-background pr-3 pl-9 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
                 />
               </label>
@@ -740,11 +767,11 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
               {isLoadingStorageFiles ? (
                 <div className="flex items-center justify-center gap-2 px-4 py-12 text-muted-foreground">
                   <Loader2 className="size-4 animate-spin" />
-                  Loading files
+                  {t("files.loading")}
                 </div>
               ) : addableFiles.length === 0 ? (
                 <div className="px-4 py-12 text-center text-sm text-muted-foreground">
-                  No files available to add.
+                  {t("detail.noFilesAvailable")}
                 </div>
               ) : (
                 <div className="divide-y">
@@ -778,12 +805,12 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
 
             <div className="flex items-center justify-between gap-3 border-t p-4">
               <p className="text-xs text-muted-foreground">
-                {selectedAddKeys.size} selected
+                {t("files.selected", { count: selectedAddKeys.size })}
               </p>
               <div className="flex gap-2">
                 <Dialog.Close asChild>
                   <Button variant="outline" disabled={isAddingFiles}>
-                    Close
+                    {t("common.close")}
                   </Button>
                 </Dialog.Close>
                 <Button
@@ -795,7 +822,7 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
                   ) : (
                     <Plus className="size-4" />
                   )}
-                  Add selected
+                  {t("detail.addSelected")}
                 </Button>
               </div>
             </div>

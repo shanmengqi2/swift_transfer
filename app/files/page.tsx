@@ -8,8 +8,8 @@ export default async function FilesPage() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-16 sm:px-6 lg:px-8">
       <PageHeader
-        title="Manage S3 Files"
-        description="Browse objects, create presigned download links, and remove files from the configured bucket."
+        titleKey="pages.files.title"
+        descriptionKey="pages.files.description"
         activePage="files"
         username={session?.username}
       />

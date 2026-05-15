@@ -8,8 +8,8 @@ export default async function PickupCodesPage() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-16 sm:px-6 lg:px-8">
       <PageHeader
-        title="Manage Pickup Codes"
-        description="Review active sharing codes, scan their file contents, and copy pickup links."
+        titleKey="pages.pickupCodes.title"
+        descriptionKey="pages.pickupCodes.description"
         activePage="pickup-codes"
         username={session?.username}
       />
