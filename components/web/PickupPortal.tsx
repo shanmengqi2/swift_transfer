@@ -5,6 +5,8 @@ import { Download, KeyRound, Loader2, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { useI18n } from "@/components/i18n-provider";
+import { countLabel, formatDateTime, type Language } from "@/lib/i18n";
 
 type PickupFile = {
   key: string;
@@ -42,15 +44,8 @@ function formatBytes(bytes: number | null) {
   }`;
 }
 
-function formatDate(value: string | null) {
-  if (!value) {
-    return "Never expires";
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+function formatDate(value: string | null, language: Language) {
+  return formatDateTime(value, language, "common.neverExpires");
 }
 
 type PickupPortalProps = {
@@ -61,13 +56,14 @@ export function PickupPortal({ initialCode = "" }: PickupPortalProps) {
   const [code, setCode] = useState(initialCode);
   const [isResolving, setIsResolving] = useState(false);
   const [pickup, setPickup] = useState<PickupResult | null>(null);
+  const { language, t } = useI18n();
 
   const resolvePickupCode = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     const normalizedCode = code.trim();
     if (normalizedCode.length !== 6) {
-      toast.error("Pickup code must be 6 characters");
+      toast.error(t("pickup.codeLength"));
       return;
     }
 
@@ -88,7 +84,7 @@ export function PickupPortal({ initialCode = "" }: PickupPortalProps) {
       setPickup(data.pickup);
     } catch {
       setPickup(null);
-      toast.error("Pickup code is invalid or expired");
+      toast.error(t("pickup.invalid"));
     } finally {
       setIsResolving(false);
     }
@@ -99,10 +95,10 @@ export function PickupPortal({ initialCode = "" }: PickupPortalProps) {
       <div className="mb-8 flex flex-col gap-2">
         <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
           <KeyRound className="size-4" />
-          Swift Transfer
+          {t("common.brand")}
         </div>
         <h1 className="text-3xl font-bold tracking-normal sm:text-4xl">
-          Pickup files
+          {t("pickup.portalTitle")}
         </h1>
       </div>
 
@@ -123,7 +119,7 @@ export function PickupPortal({ initialCode = "" }: PickupPortalProps) {
                       .slice(0, 6),
                   )
                 }
-                placeholder="Enter pickup code"
+                placeholder={t("pickup.enterCode")}
                 className="h-9 w-full rounded-lg border bg-background pr-3 pl-9 font-mono text-sm tracking-normal outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
               />
             </label>
@@ -136,7 +132,7 @@ export function PickupPortal({ initialCode = "" }: PickupPortalProps) {
               ) : (
                 <KeyRound className="size-4" />
               )}
-              Open
+              {t("pickup.open")}
             </Button>
           </form>
 
@@ -148,12 +144,11 @@ export function PickupPortal({ initialCode = "" }: PickupPortalProps) {
                     {pickup.code}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {formatDate(pickup.expiresAt)}
+                    {formatDate(pickup.expiresAt, language)}
                   </p>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {pickup.files.length} file
-                  {pickup.files.length === 1 ? "" : "s"}
+                  {countLabel(language, pickup.files.length, "file", "files", "个文件")}
                 </p>
               </div>
 
@@ -173,9 +168,12 @@ export function PickupPortal({ initialCode = "" }: PickupPortalProps) {
                       <p className="mt-1 text-xs text-muted-foreground">
                         {formatBytes(file.size)}
                         {file.exists && file.downloadUrlExpiresAt
-                          ? ` · link expires ${formatDate(
+                          ? ` · ${t("pickup.linkExpires", {
+                              date: formatDate(
                               file.downloadUrlExpiresAt,
-                            )}`
+                              language,
+                            ),
+                            })}`
                           : ""}
                       </p>
                     </div>
@@ -183,12 +181,12 @@ export function PickupPortal({ initialCode = "" }: PickupPortalProps) {
                       <Button asChild className="sm:self-center">
                         <a href={file.downloadUrl}>
                           <Download className="size-4" />
-                          Download
+                          {t("pickup.download")}
                         </a>
                       </Button>
                     ) : (
                       <span className="rounded-md bg-muted px-2 py-1 text-sm text-muted-foreground">
-                        File missing
+                        {t("common.fileMissing")}
                       </span>
                     )}
                   </div>
@@ -197,7 +195,7 @@ export function PickupPortal({ initialCode = "" }: PickupPortalProps) {
             </div>
           ) : (
             <div className="px-4 py-12 text-center text-sm text-muted-foreground">
-              Enter a pickup code to view available files.
+              {t("pickup.emptyPrompt")}
             </div>
           )}
         </CardContent>

@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { v4 as uuidv4 } from "uuid";
 import { FileIcon, Loader2, Trash2, X } from "lucide-react";
 import type { UploadLimits } from "@/lib/uploadLimits";
+import { useI18n } from "@/components/i18n-provider";
 
 const FILE_PLACEHOLDER_SRC = "/File.png";
 
@@ -60,6 +61,7 @@ export function Uploader({ limits }: UploaderProps) {
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const uploadJobsRef = useRef(new Map<string, UploadJob>());
   const { maxFiles, maxFileSizeMb, maxFileSizeBytes } = limits;
+  const { t } = useI18n();
 
   const revokeObjectUrl = (file?: UploadFile) => {
     if (file?.objectUrl) {
@@ -92,7 +94,7 @@ export function Uploader({ limits }: UploaderProps) {
 
       const deleted = await cleanupS3Object(fileToRemove?.key);
       if (!deleted) {
-        toast.error("Failed to delete file");
+        toast.error(t("upload.failedDelete"));
         setFiles((prevFiles) =>
           prevFiles.map((f) =>
             f.id === fileId ? { ...f, isDeleting: false, error: true } : f,
@@ -103,10 +105,10 @@ export function Uploader({ limits }: UploaderProps) {
       }
 
       revokeObjectUrl(fileToRemove);
-      toast.success("File deleted successfully");
+      toast.success(t("upload.deleted"));
       setFiles((prevFiles) => prevFiles.filter((f) => f.id !== fileId));
     } catch {
-      toast.error("Failed to delete file");
+      toast.error(t("upload.failedDelete"));
       setFiles((prevFiles) =>
         prevFiles.map((f) =>
           f.id === fileId ? { ...f, isDeleting: false, error: true } : f,
@@ -163,10 +165,7 @@ export function Uploader({ limits }: UploaderProps) {
         }
 
         if (!presignedUrlResponse.ok) {
-          const responseBody = await presignedUrlResponse
-            .json()
-            .catch(() => null);
-          toast.error(responseBody?.error ?? "failed to get Presigned Url");
+          toast.error(t("upload.failedPresign"));
           setFiles((prevFiles) =>
             prevFiles.map((f) =>
               f.id === fileId
@@ -224,7 +223,7 @@ export function Uploader({ limits }: UploaderProps) {
                 ),
               );
 
-              toast.success("File uploaded successfully");
+              toast.success(t("upload.uploaded"));
               resolve();
             } else {
               reject(new Error(`Upload failed with status: ${xhr.status}`));
@@ -255,14 +254,14 @@ export function Uploader({ limits }: UploaderProps) {
           setFiles((prevFiles) => prevFiles.filter((f) => f.id !== fileId));
 
           if (cleaned) {
-            toast.success("Upload cancelled");
+            toast.success(t("upload.cancelled"));
           } else {
-            toast.error("Upload cancelled, but S3 cleanup failed");
+            toast.error(t("upload.cancelledCleanupFailed"));
           }
           return;
         }
 
-        toast.error("Upload failed");
+        toast.error(t("upload.failed"));
         setFiles((prevFiles) =>
           prevFiles.map((f) =>
             f.id === fileId
@@ -276,7 +275,7 @@ export function Uploader({ limits }: UploaderProps) {
         }
       }
     },
-    [cleanupS3Object],
+    [cleanupS3Object, t],
   );
 
   const onDrop = useCallback(
@@ -285,11 +284,11 @@ export function Uploader({ limits }: UploaderProps) {
       const errorCodes = getRejectionErrorCodes(fileRejections);
 
       if (droppedFileCount > maxFiles || errorCodes.has("too-many-files")) {
-        toast.error(`You can only upload up to ${maxFiles} files.`);
+        toast.error(t("upload.maxFiles", { maxFiles }));
       }
 
       if (errorCodes.has("file-too-large")) {
-        toast.error(`Each file must be less than ${maxFileSizeMb}MB.`);
+        toast.error(t("upload.maxSize", { maxFileSizeMb }));
       }
 
       if (acceptedFiles.length > 0) {
@@ -313,7 +312,7 @@ export function Uploader({ limits }: UploaderProps) {
         uploads.forEach((upload) => uploadFile(upload, droppedFileCount));
       }
     },
-    [maxFileSizeMb, maxFiles, uploadFile],
+    [maxFileSizeMb, maxFiles, t, uploadFile],
   );
   const onDropRejected = useCallback((fileRejections: FileRejection[]) => {
     console.log("rejected:", fileRejections);
@@ -347,11 +346,11 @@ export function Uploader({ limits }: UploaderProps) {
         <CardContent className="flex flex-col items-center justify-center h-full w-full">
           <input {...getInputProps()} />
           {isDragActive ? (
-            <p className="text-center">Drop the files here ...</p>
+            <p className="text-center">{t("upload.dropHere")}</p>
           ) : (
             <div className="flex flex-col items-center justify-center h-full w-full gap-y-3">
-              <p>Drag and drop some files here, or click to select files</p>
-              <Button>Select files</Button>
+              <p>{t("upload.prompt")}</p>
+              <Button>{t("upload.selectFiles")}</Button>
             </div>
           )}
         </CardContent>
@@ -381,7 +380,11 @@ export function Uploader({ limits }: UploaderProps) {
                   });
                 }}
                 disabled={file.isDeleting || file.isCancelling}
-                aria-label={file.uploading ? "Cancel upload" : "Delete file"}
+                aria-label={
+                  file.uploading
+                    ? t("upload.cancelUpload")
+                    : t("upload.deleteFile")
+                }
               >
                 {file.isDeleting || file.isCancelling ? (
                   <Loader2 className="animate-spin" />
@@ -407,7 +410,9 @@ export function Uploader({ limits }: UploaderProps) {
 
               {file.error && (
                 <div className="pointer-events-none absolute inset-0 z-10 bg-red-500/50 flex items-center justify-center">
-                  <p className="text-white font-medium text-lg">Error</p>
+                  <p className="text-white font-medium text-lg">
+                    {t("common.error")}
+                  </p>
                 </div>
               )}
             </div>
@@ -419,7 +424,7 @@ export function Uploader({ limits }: UploaderProps) {
               <div className="flex items-center gap-1 text-xs text-muted-foreground">
                 <FileIcon className="size-3" />
                 <span className="truncate">
-                  {file.file.type || "Unknown file type"}
+                  {file.file.type || t("common.unknownFileType")}
                 </span>
               </div>
             )}
@@ -439,12 +444,14 @@ export function Uploader({ limits }: UploaderProps) {
           <AlertDialog.Overlay className="fixed inset-0 z-50 bg-black/45" />
           <AlertDialog.Content className="fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-5 shadow-lg">
             <AlertDialog.Title className="text-lg font-semibold">
-              {isCancelConfirmation ? "Cancel upload?" : "Delete this file?"}
+              {isCancelConfirmation
+                ? t("upload.cancelTitle")
+                : t("upload.deleteTitle")}
             </AlertDialog.Title>
             <AlertDialog.Description className="mt-2 text-sm text-muted-foreground">
               {isCancelConfirmation
-                ? "The upload will stop now and any unfinished S3 object will be cleaned up."
-                : "This will permanently remove the file from S3."}
+                ? t("upload.cancelDescription")
+                : t("upload.deleteDescription")}
             </AlertDialog.Description>
 
             {confirmationFile && (
@@ -455,7 +462,7 @@ export function Uploader({ limits }: UploaderProps) {
 
             <div className="mt-5 flex justify-end gap-2">
               <AlertDialog.Cancel asChild>
-                <Button variant="outline">Keep</Button>
+                <Button variant="outline">{t("common.keep")}</Button>
               </AlertDialog.Cancel>
               <AlertDialog.Action asChild>
                 <Button
@@ -476,7 +483,9 @@ export function Uploader({ limits }: UploaderProps) {
                     void removeFile(currentConfirmation.fileId);
                   }}
                 >
-                  {isCancelConfirmation ? "Cancel upload" : "Delete"}
+                  {isCancelConfirmation
+                    ? t("upload.cancelUpload")
+                    : t("common.delete")}
                 </Button>
               </AlertDialog.Action>
             </div>

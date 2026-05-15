@@ -10,8 +10,8 @@ export default async function Home() {
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-2xl flex-col px-4 py-16 sm:px-6 lg:px-8">
       <PageHeader
-        title="Upload your Files with S3"
-        description="Drop files into object storage, then jump to the manager to create download links or remove files."
+        titleKey="pages.upload.title"
+        descriptionKey="pages.upload.description"
         activePage="upload"
         username={session?.username}
       />

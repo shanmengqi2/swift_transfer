@@ -18,6 +18,13 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { useI18n } from "@/components/i18n-provider";
+import {
+  countLabel,
+  formatDateTime,
+  type Language,
+  type TranslationKey,
+} from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 type PickupFilePreview = {
@@ -40,6 +47,12 @@ type PickupCodeListItem = {
   filePreview: PickupFilePreview[];
 };
 
+type StatusInfo = {
+  labelKey: TranslationKey;
+  icon: typeof XCircle;
+  className: string;
+};
+
 function formatBytes(bytes: number | null) {
   if (bytes === null) {
     return "-";
@@ -60,52 +73,48 @@ function formatBytes(bytes: number | null) {
   }`;
 }
 
-function formatDate(value: string | null) {
-  if (!value) {
-    return "Never";
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+function formatDate(value: string | null, language: Language) {
+  return formatDateTime(value, language);
 }
 
 function getStatus(pickupCode: PickupCodeListItem) {
   if (pickupCode.revokedAt) {
     return {
-      label: "Revoked",
+      labelKey: "common.revoked",
       icon: XCircle,
       className: "text-destructive",
-    };
+    } satisfies StatusInfo;
   }
 
   if (!pickupCode.expiresAt) {
     return {
-      label: "Permanent",
+      labelKey: "common.permanent",
       icon: Infinity,
       className: "text-foreground",
-    };
+    } satisfies StatusInfo;
   }
 
   if (new Date(pickupCode.expiresAt).getTime() <= Date.now()) {
     return {
-      label: "Expired",
+      labelKey: "common.expired",
       icon: XCircle,
       className: "text-destructive",
-    };
+    } satisfies StatusInfo;
   }
 
   return {
-    label: "Active",
+    labelKey: "common.active",
     icon: CheckCircle2,
     className: "text-foreground",
-  };
+  } satisfies StatusInfo;
 }
 
-function getFileSummary(pickupCode: PickupCodeListItem) {
+function getFileSummary(
+  pickupCode: PickupCodeListItem,
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string,
+) {
   if (pickupCode.fileCount === 0) {
-    return "No files";
+    return t("pickup.noFiles");
   }
 
   const visibleFiles = pickupCode.filePreview.slice(
@@ -115,15 +124,21 @@ function getFileSummary(pickupCode: PickupCodeListItem) {
   const names = visibleFiles.map((file) => file.fileName).join(", ");
   const remainingCount = pickupCode.fileCount - visibleFiles.length;
 
-  return remainingCount > 0 ? `${names} + ${remainingCount} more` : names;
+  return remainingCount > 0
+    ? t("pickup.moreFiles", { names, count: remainingCount })
+    : names;
 }
 
-async function copyToClipboard(text: string, message: string) {
+async function copyToClipboard(
+  text: string,
+  message: string,
+  failedMessage: string,
+) {
   try {
     await navigator.clipboard.writeText(text);
     toast.success(message);
   } catch {
-    toast.error("Failed to copy");
+    toast.error(failedMessage);
   }
 }
 
@@ -132,6 +147,7 @@ export function PickupCodesManager() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const { language, t } = useI18n();
 
   const fetchPickupCodes = useCallback(async () => {
     const response = await fetch("/api/pickup-codes", { cache: "no-store" });
@@ -156,7 +172,7 @@ export function PickupCodesManager() {
       })
       .catch(() => {
         if (!ignore) {
-          toast.error("Failed to load pickup codes");
+          toast.error(t("files.failedLoadPickupCodes"));
         }
       })
       .finally(() => {
@@ -168,7 +184,7 @@ export function PickupCodesManager() {
     return () => {
       ignore = true;
     };
-  }, [fetchPickupCodes]);
+  }, [fetchPickupCodes, t]);
 
   const refreshPickupCodes = async () => {
     setIsRefreshing(true);
@@ -176,7 +192,7 @@ export function PickupCodesManager() {
     try {
       setPickupCodes(await fetchPickupCodes());
     } catch {
-      toast.error("Failed to load pickup codes");
+      toast.error(t("files.failedLoadPickupCodes"));
     } finally {
       setIsRefreshing(false);
     }
@@ -205,9 +221,12 @@ export function PickupCodesManager() {
       <CardContent className="p-0">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
           <div>
-            <p className="text-sm font-medium">Pickup codes</p>
+            <p className="text-sm font-medium">{t("pickup.cardTitle")}</p>
             <p className="text-xs text-muted-foreground">
-              {filteredPickupCodes.length} of {pickupCodes.length} codes
+              {t("pickup.countSummary", {
+                filtered: filteredPickupCodes.length,
+                total: pickupCodes.length,
+              })}
             </p>
           </div>
           <Button
@@ -220,7 +239,7 @@ export function PickupCodesManager() {
             ) : (
               <RefreshCw className="size-4" />
             )}
-            Refresh
+            {t("common.refresh")}
           </Button>
         </div>
 
@@ -231,7 +250,7 @@ export function PickupCodesManager() {
               type="search"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search code or file"
+              placeholder={t("pickup.searchPlaceholder")}
               className="h-9 w-full rounded-lg border bg-background pr-3 pl-9 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
             />
           </label>
@@ -241,15 +260,21 @@ export function PickupCodesManager() {
           <table className="w-full min-w-190 table-fixed text-sm">
             <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
               <tr className="border-b">
-                <th className="w-30 px-4 py-3 font-medium">Code</th>
-                <th className="w-28 px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium">Files</th>
-                <th className="w-40 px-4 py-3 font-medium">Expires</th>
+                <th className="w-30 px-4 py-3 font-medium">
+                  {t("pickup.code")}
+                </th>
+                <th className="w-28 px-4 py-3 font-medium">
+                  {t("pickup.status")}
+                </th>
+                <th className="px-4 py-3 font-medium">{t("pickup.files")}</th>
+                <th className="w-40 px-4 py-3 font-medium">
+                  {t("pickup.expires")}
+                </th>
                 <th className="hidden w-40 px-4 py-3 font-medium lg:table-cell">
-                  Created
+                  {t("pickup.created")}
                 </th>
                 <th className="sticky right-0 w-24 bg-muted/50 px-4 py-3 text-right font-medium shadow-[-8px_0_12px_-12px_rgba(0,0,0,0.45)]">
-                  Actions
+                  {t("files.actions")}
                 </th>
               </tr>
             </thead>
@@ -259,7 +284,7 @@ export function PickupCodesManager() {
                   <td colSpan={6} className="px-4 py-12 text-center">
                     <div className="flex items-center justify-center gap-2 text-muted-foreground">
                       <Loader2 className="size-4 animate-spin" />
-                      Loading pickup codes
+                      {t("pickup.loading")}
                     </div>
                   </td>
                 </tr>
@@ -269,7 +294,7 @@ export function PickupCodesManager() {
                     colSpan={6}
                     className="px-4 py-12 text-center text-muted-foreground"
                   >
-                    No pickup codes found.
+                    {t("pickup.empty")}
                   </td>
                 </tr>
               ) : (
@@ -295,23 +320,30 @@ export function PickupCodesManager() {
                           )}
                         >
                           <StatusIcon className="size-4" />
-                          {status.label}
+                          {t(status.labelKey)}
                         </div>
                       </td>
                       <td className="px-4 py-3">
                         <p className="truncate font-medium">
-                          {getFileSummary(pickupCode)}
+                          {getFileSummary(pickupCode, t)}
                         </p>
                         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                           <span>
-                            {pickupCode.fileCount} file
-                            {pickupCode.fileCount === 1 ? "" : "s"}
+                            {countLabel(
+                              language,
+                              pickupCode.fileCount,
+                              "file",
+                              "files",
+                              "个文件",
+                            )}
                           </span>
                           <span>{formatBytes(pickupCode.totalSize)}</span>
                           {pickupCode.missingFileCount > 0 && (
                             <span className="inline-flex items-center gap-1 text-destructive">
                               <AlertTriangle className="size-3" />
-                              {pickupCode.missingFileCount} missing
+                              {t("pickup.missing", {
+                                count: pickupCode.missingFileCount,
+                              })}
                             </span>
                           )}
                         </div>
@@ -319,21 +351,23 @@ export function PickupCodesManager() {
                       <td className="px-4 py-3 text-muted-foreground">
                         {pickupCode.expiresAt ? (
                           <div>
-                            <div>{formatDate(pickupCode.expiresAt)}</div>
+                            <div>
+                              {formatDate(pickupCode.expiresAt, language)}
+                            </div>
                             <div className="mt-0.5 flex items-center gap-1 text-xs">
                               <Clock className="size-3" />
-                              {status.label}
+                              {t(status.labelKey)}
                             </div>
                           </div>
                         ) : (
                           <div className="flex items-center gap-1.5">
                             <Infinity className="size-4" />
-                            Never expires
+                            {t("common.neverExpires")}
                           </div>
                         )}
                       </td>
                       <td className="hidden px-4 py-3 text-muted-foreground lg:table-cell">
-                        {formatDate(pickupCode.createdAt)}
+                        {formatDate(pickupCode.createdAt, language)}
                       </td>
                       <td className="sticky right-0 bg-card px-4 py-3 shadow-[-8px_0_12px_-12px_rgba(0,0,0,0.45)]">
                         <div className="flex justify-end gap-2">
@@ -345,18 +379,21 @@ export function PickupCodesManager() {
                                 `${window.location.origin}/pickup?code=${encodeURIComponent(
                                   pickupCode.code,
                                 )}`,
-                                "Pickup link copied",
+                                t("pickup.linkCopied"),
+                                t("detail.failedCopy"),
                               )
                             }
                           >
                             <Copy className="size-4" />
-                            <span className="sr-only">Copy pickup link</span>
+                            <span className="sr-only">
+                              {t("pickup.copyPickupLink")}
+                            </span>
                           </Button>
                           <Button asChild variant="outline" size="icon">
                             <Link href={`/pickup-codes/${pickupCode.id}`}>
                               <ExternalLink className="size-4" />
                               <span className="sr-only">
-                                Open pickup code detail
+                                {t("pickup.openDetail")}
                               </span>
                             </Link>
                           </Button>

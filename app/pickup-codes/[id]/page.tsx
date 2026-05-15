@@ -14,8 +14,8 @@ export default async function PickupCodeDetailPage({
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-16 sm:px-6 lg:px-8">
       <PageHeader
-        title="Pickup Code Detail"
-        description="Update expiration, inspect shared files, and revoke access."
+        titleKey="pages.pickupCodeDetail.title"
+        descriptionKey="pages.pickupCodeDetail.description"
         activePage="pickup-codes"
         username={session?.username}
       />
