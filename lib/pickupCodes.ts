@@ -1,6 +1,6 @@
 import { randomBytes, randomInt } from "node:crypto";
 import { ListObjectsV2Command } from "@aws-sdk/client-s3";
-import { displayFileName, getBucketName, type ManagedFile } from "@/lib/files";
+import { getBucketName, getObjectDisplayPath, type ManagedFile } from "@/lib/files";
 import { getSql } from "@/lib/postgres";
 import { getS3Client } from "@/lib/s3Client";
 
@@ -31,6 +31,11 @@ export type PickupFile = {
   size: number | null;
 };
 
+export type PickupFilePreview = PickupFile & {
+  previewName: string;
+  isDirectory: boolean;
+};
+
 export type PickupShare = {
   id: string;
   code: string;
@@ -49,7 +54,8 @@ export type PickupCodeListItem = PickupCode & {
   fileCount: number;
   totalSize: number | null;
   missingFileCount: number;
-  filePreview: PickupFile[];
+  filePreview: PickupFilePreview[];
+  previewCount: number;
 };
 
 export type PickupCodeForFile = PickupCode & {
@@ -159,6 +165,27 @@ function mapPickupFileRow(row: PickupFileRow): PickupFile {
   };
 }
 
+function summarizePickupFiles(files: PickupFile[]) {
+  const previewItems = new Map<string, PickupFilePreview>();
+
+  for (const file of files) {
+    const [directoryName] = file.fileName.split("/");
+    const isDirectory = file.fileName.includes("/") && Boolean(directoryName);
+    const previewKey = isDirectory ? `directory:${directoryName}` : `file:${file.key}`;
+
+    if (!previewItems.has(previewKey)) {
+      previewItems.set(previewKey, {
+        ...file,
+        fileName: isDirectory ? directoryName : file.fileName,
+        previewName: isDirectory ? directoryName : file.fileName,
+        isDirectory,
+      });
+    }
+  }
+
+  return [...previewItems.values()];
+}
+
 export function isPickupCodeExpired(expiresAt: string | null) {
   return expiresAt ? new Date(expiresAt).getTime() <= Date.now() : false;
 }
@@ -229,7 +256,7 @@ export async function createPickupCode({
             files.map((file) => ({
               key: file.key,
               bucket: file.bucket ?? bucket,
-              file_name: file.fileName ?? displayFileName(file.key),
+              file_name: file.fileName ?? getObjectDisplayPath(file.key),
               size: file.size ?? null,
             })),
           ),
@@ -413,7 +440,7 @@ export async function addPickupCodeFiles({
         files.map((file) => ({
           key: file.key,
           bucket: file.bucket ?? bucket,
-          file_name: file.fileName ?? displayFileName(file.key),
+          file_name: file.fileName ?? getObjectDisplayPath(file.key),
           size: file.size ?? null,
         })),
       ),
@@ -537,13 +564,18 @@ export async function listPickupCodes() {
     }
   }
 
-  return codeRows.map((row) => ({
-    ...mapPickupCodeRow(row),
-    fileCount: Number(row.file_count),
-    totalSize: row.total_size === null ? null : Number(row.total_size),
-    missingFileCount: missingCountsByCode.get(row.id) ?? 0,
-    filePreview: (filesByCode.get(row.id) ?? []).slice(0, 3),
-  }));
+  return codeRows.map((row) => {
+    const previewItems = summarizePickupFiles(filesByCode.get(row.id) ?? []);
+
+    return {
+      ...mapPickupCodeRow(row),
+      fileCount: Number(row.file_count),
+      totalSize: row.total_size === null ? null : Number(row.total_size),
+      missingFileCount: missingCountsByCode.get(row.id) ?? 0,
+      filePreview: previewItems.slice(0, 3),
+      previewCount: previewItems.length,
+    };
+  });
 }
 
 export async function listPickupCodesForFile(key: string) {

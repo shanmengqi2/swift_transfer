@@ -4,9 +4,9 @@ import { v4 as uuidv4 } from "uuid";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import {
+  createUploadObjectKey,
   getBucketName,
   normalizeUploadedContentType,
-  normalizeUploadedFileName,
 } from "@/lib/files";
 import { authenticateRequest } from "@/lib/auth/guards";
 import { getS3Client } from "@/lib/s3Client";
@@ -16,6 +16,7 @@ export const runtime = "nodejs";
 
 const uploadRequestSchema = z.object({
   fileName: z.string().min(1),
+  relativePath: z.string().min(1).optional(),
   contentType: z.string().min(1),
   size: z.number().int().positive(),
   batchFileCount: z.number().int().positive(),
@@ -35,7 +36,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 
-    const { fileName, contentType, size, batchFileCount } = validation.data;
+    const { fileName, relativePath, contentType, size, batchFileCount } =
+      validation.data;
     const limits = getUploadLimits();
 
     if (batchFileCount > limits.maxFiles) {
@@ -54,8 +56,20 @@ export async function POST(request: Request) {
       );
     }
 
-    const normalizedFileName = normalizeUploadedFileName(fileName);
-    const uniqueKey = `${uuidv4()}-${normalizedFileName}`;
+    let uniqueKey: string;
+    try {
+      uniqueKey = createUploadObjectKey({
+        id: uuidv4(),
+        fileName,
+        relativePath,
+      });
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid relative path" },
+        { status: 400 },
+      );
+    }
+
     const resolvedContentType = normalizeUploadedContentType(
       fileName,
       contentType,

@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, type ChangeEvent } from "react";
 import { useDropzone } from "react-dropzone";
 import { AlertDialog } from "radix-ui";
 import { Card, CardContent } from "../ui/card";
@@ -10,7 +10,7 @@ import { Button } from "../ui/button";
 import type { FileRejection } from "react-dropzone";
 import { toast } from "sonner";
 import { v4 as uuidv4 } from "uuid";
-import { FileIcon, Loader2, Trash2, X } from "lucide-react";
+import { FileIcon, FolderUp, Loader2, Trash2, X } from "lucide-react";
 import type { UploadLimits } from "@/lib/uploadLimits";
 import { useI18n } from "@/components/i18n-provider";
 
@@ -23,6 +23,7 @@ function displayUploadFileName(fileName: string) {
 type UploadFile = {
   id: string;
   file: File;
+  relativePath?: string;
   uploading: boolean;
   progress: number;
   key?: string;
@@ -31,6 +32,12 @@ type UploadFile = {
   error: boolean;
   objectUrl?: string;
   isImage: boolean;
+};
+
+type FileWithPath = File & {
+  path?: string;
+  relativePath?: string;
+  webkitRelativePath?: string;
 };
 
 type UploadJob = {
@@ -60,6 +67,7 @@ export function Uploader({ limits }: UploaderProps) {
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const uploadJobsRef = useRef(new Map<string, UploadJob>());
+  const folderInputRef = useRef<HTMLInputElement>(null);
   const { maxFiles, maxFileSizeMb, maxFileSizeBytes } = limits;
   const { t } = useI18n();
 
@@ -154,6 +162,7 @@ export function Uploader({ limits }: UploaderProps) {
           signal: presignController.signal,
           body: JSON.stringify({
             fileName: file.name,
+            relativePath: upload.relativePath,
             contentType: file.type || "application/octet-stream",
             size: file.size,
             batchFileCount,
@@ -278,6 +287,53 @@ export function Uploader({ limits }: UploaderProps) {
     [cleanupS3Object, t],
   );
 
+  const getRelativePath = (file: File) => {
+    const fileWithPath = file as FileWithPath;
+    const rawPath =
+      fileWithPath.relativePath ||
+      fileWithPath.webkitRelativePath ||
+      fileWithPath.path;
+
+    if (!rawPath) {
+      return undefined;
+    }
+
+    const normalizedPath = rawPath
+      .replaceAll("\\", "/")
+      .replace(/^\.\//, "")
+      .replace(/^\/+/, "");
+    return normalizedPath.includes("/") ? normalizedPath : undefined;
+  };
+
+  const queueUploads = useCallback(
+    (acceptedFiles: File[], batchFileCount: number) => {
+      if (acceptedFiles.length === 0) {
+        return;
+      }
+
+      const uploads: UploadFile[] = acceptedFiles.map((file) => {
+        const isImage = file.type.startsWith("image/");
+
+        return {
+          id: uuidv4(),
+          file,
+          relativePath: getRelativePath(file),
+          uploading: false,
+          progress: 0,
+          isDeleting: false,
+          isCancelling: false,
+          error: false,
+          isImage,
+          objectUrl: isImage ? URL.createObjectURL(file) : undefined,
+        };
+      });
+
+      setFiles((prevFiles) => [...prevFiles, ...uploads]);
+      uploads.forEach((upload) => uploadFile(upload, batchFileCount));
+    },
+    [uploadFile],
+  );
+
   const onDrop = useCallback(
     (acceptedFiles: File[], fileRejections: FileRejection[]) => {
       const droppedFileCount = acceptedFiles.length + fileRejections.length;
@@ -291,37 +347,40 @@ export function Uploader({ limits }: UploaderProps) {
         toast.error(t("upload.maxSize", { maxFileSizeMb }));
       }
 
-      if (acceptedFiles.length > 0) {
-        const uploads: UploadFile[] = acceptedFiles.map((file) => {
-          const isImage = file.type.startsWith("image/");
-
-          return {
-            id: uuidv4(),
-            file,
-            uploading: false,
-            progress: 0,
-            isDeleting: false,
-            isCancelling: false,
-            error: false,
-            isImage,
-            objectUrl: isImage ? URL.createObjectURL(file) : undefined,
-          };
-        });
-
-        setFiles((prevFiles) => [...prevFiles, ...uploads]);
-        uploads.forEach((upload) => uploadFile(upload, droppedFileCount));
-      }
+      queueUploads(acceptedFiles, droppedFileCount);
     },
-    [maxFileSizeMb, maxFiles, t, uploadFile],
+    [maxFileSizeMb, maxFiles, queueUploads, t],
   );
+
+  const onFolderSelected = (event: ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(event.target.files ?? []);
+    event.target.value = "";
+
+    if (selectedFiles.length > maxFiles) {
+      toast.error(t("upload.maxFiles", { maxFiles }));
+      return;
+    }
+
+    const acceptedFiles = selectedFiles.filter(
+      (file) => file.size <= maxFileSizeBytes,
+    );
+
+    if (acceptedFiles.length < selectedFiles.length) {
+      toast.error(t("upload.maxSize", { maxFileSizeMb }));
+    }
+
+    queueUploads(acceptedFiles, selectedFiles.length);
+  };
+
   const onDropRejected = useCallback((fileRejections: FileRejection[]) => {
     console.log("rejected:", fileRejections);
   }, []);
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+  const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
     onDrop,
     onDropRejected,
     maxFiles,
     maxSize: maxFileSizeBytes,
+    noClick: true,
   });
 
   const confirmationFile = confirmation
@@ -345,12 +404,42 @@ export function Uploader({ limits }: UploaderProps) {
       >
         <CardContent className="flex flex-col items-center justify-center h-full w-full">
           <input {...getInputProps()} />
+          <input
+            ref={folderInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            aria-label={t("upload.selectFolder")}
+            onChange={onFolderSelected}
+            {...{ webkitdirectory: "", directory: "" }}
+          />
           {isDragActive ? (
             <p className="text-center">{t("upload.dropHere")}</p>
           ) : (
             <div className="flex flex-col items-center justify-center h-full w-full gap-y-3">
               <p>{t("upload.prompt")}</p>
-              <Button>{t("upload.selectFiles")}</Button>
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    open();
+                  }}
+                >
+                  {t("upload.selectFiles")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    folderInputRef.current?.click();
+                  }}
+                >
+                  <FolderUp className="size-4" />
+                  {t("upload.selectFolder")}
+                </Button>
+              </div>
             </div>
           )}
         </CardContent>
@@ -418,7 +507,7 @@ export function Uploader({ limits }: UploaderProps) {
             </div>
 
             <p className="text-sm text-muted-foreground truncate">
-              {displayUploadFileName(file.file.name)}
+              {displayUploadFileName(file.relativePath ?? file.file.name)}
             </p>
             {!file.isImage && (
               <div className="flex items-center gap-1 text-xs text-muted-foreground">

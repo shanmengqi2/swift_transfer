@@ -50,6 +50,7 @@ type StorageFile = {
   bucket: string;
   key: string;
   fileName: string;
+  displayPath: string;
   size: number;
 };
 
@@ -242,6 +243,7 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
 
       return (
         file.fileName.toLocaleLowerCase().includes(normalizedQuery) ||
+        file.displayPath.toLocaleLowerCase().includes(normalizedQuery) ||
         file.key.toLocaleLowerCase().includes(normalizedQuery)
       );
     });
@@ -389,7 +391,7 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
           files: selectedFiles.map((file) => ({
             key: file.key,
             bucket: file.bucket,
-            fileName: file.fileName,
+            fileName: file.displayPath,
             size: file.size,
           })),
         }),
@@ -788,7 +790,7 @@ export function PickupCodeDetail({ id }: PickupCodeDetailProps) {
                       />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-medium">
-                          {file.fileName}
+                          {file.displayPath}
                         </span>
                         <span className="block truncate text-xs text-muted-foreground">
                           {file.key}
