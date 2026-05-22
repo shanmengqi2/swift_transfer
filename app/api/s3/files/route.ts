@@ -1,7 +1,13 @@
 import { ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/auth/guards";
-import { displayFileName, getBucketName, type ManagedFile } from "@/lib/files";
+import {
+  displayFileName,
+  getBucketName,
+  getObjectDisplayPath,
+  getObjectParentPath,
+  type ManagedFile,
+} from "@/lib/files";
 import { attachPickupMetadata } from "@/lib/pickupCodes";
 import { listPresignedLinks } from "@/lib/presignedLinks";
 import { getS3Client } from "@/lib/s3Client";
@@ -46,6 +52,8 @@ export async function GET(request: Request) {
           bucket,
           key,
           fileName: displayFileName(key),
+          displayPath: getObjectDisplayPath(key),
+          parentPath: getObjectParentPath(key),
           size: object.Size ?? 0,
           lastModified: object.LastModified?.toISOString() ?? null,
           presignedUrl: link?.url ?? null,

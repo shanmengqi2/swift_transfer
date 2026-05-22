@@ -12,6 +12,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:storage-paths": "node --no-warnings --experimental-strip-types scripts/storage-paths.test.mts",
     "auth:hash": "node scripts/hash-password.mjs"
   },
   "dependencies": {

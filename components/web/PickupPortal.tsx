@@ -1,7 +1,15 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { Download, KeyRound, Loader2, Search } from "lucide-react";
+import {
+  ChevronRight,
+  Download,
+  Folder,
+  Home,
+  KeyRound,
+  Loader2,
+  Search,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -22,6 +30,21 @@ type PickupResult = {
   code: string;
   expiresAt: string | null;
   files: PickupFile[];
+};
+
+type PickupDirectoryEntry = {
+  type: "directory";
+  id: string;
+  name: string;
+  path: string;
+  fileCount: number;
+  totalSize: number;
+};
+
+type PickupFileEntry = {
+  type: "file";
+  id: string;
+  file: PickupFile;
 };
 
 function formatBytes(bytes: number | null) {
@@ -48,6 +71,66 @@ function formatDate(value: string | null, language: Language) {
   return formatDateTime(value, language, "common.neverExpires");
 }
 
+function normalizePath(path: string) {
+  return path.replace(/^\/+|\/+$/g, "");
+}
+
+function getPathCrumbs(path: string) {
+  const segments = normalizePath(path).split("/").filter(Boolean);
+
+  return segments.map((segment, index) => ({
+    name: segment,
+    path: segments.slice(0, index + 1).join("/"),
+  }));
+}
+
+function buildPickupEntries(files: PickupFile[], currentPath: string) {
+  const directories = new Map<string, PickupDirectoryEntry>();
+  const directFiles: PickupFileEntry[] = [];
+  const currentPrefix = currentPath ? `${currentPath}/` : "";
+
+  for (const file of files) {
+    if (!file.fileName.startsWith(currentPrefix)) {
+      continue;
+    }
+
+    const remainder = file.fileName.slice(currentPrefix.length);
+
+    if (!remainder.includes("/")) {
+      directFiles.push({ type: "file", id: file.key, file });
+      continue;
+    }
+
+    const [directoryName] = remainder.split("/");
+    const directoryPath = currentPath
+      ? `${currentPath}/${directoryName}`
+      : directoryName;
+    const directory = directories.get(directoryPath) ?? {
+      type: "directory",
+      id: `directory:${directoryPath}`,
+      name: directoryName,
+      path: directoryPath,
+      fileCount: 0,
+      totalSize: 0,
+    };
+
+    directory.fileCount += 1;
+    directory.totalSize += file.size ?? 0;
+    directories.set(directoryPath, directory);
+  }
+
+  return [...directories.values(), ...directFiles].sort((a, b) => {
+    if (a.type !== b.type) {
+      return a.type === "directory" ? -1 : 1;
+    }
+
+    const aName = a.type === "directory" ? a.name : a.file.fileName;
+    const bName = b.type === "directory" ? b.name : b.file.fileName;
+
+    return aName.localeCompare(bName);
+  });
+}
+
 type PickupPortalProps = {
   initialCode?: string;
 };
@@ -56,7 +139,13 @@ export function PickupPortal({ initialCode = "" }: PickupPortalProps) {
   const [code, setCode] = useState(initialCode);
   const [isResolving, setIsResolving] = useState(false);
   const [pickup, setPickup] = useState<PickupResult | null>(null);
+  const [currentPath, setCurrentPath] = useState("");
   const { language, t } = useI18n();
+  const entries = pickup ? buildPickupEntries(pickup.files, currentPath) : [];
+
+  const openDirectory = (path: string) => {
+    setCurrentPath(path);
+  };
 
   const resolvePickupCode = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -82,6 +171,7 @@ export function PickupPortal({ initialCode = "" }: PickupPortalProps) {
 
       const data = (await response.json()) as { pickup: PickupResult };
       setPickup(data.pickup);
+      setCurrentPath("");
     } catch {
       setPickup(null);
       toast.error(t("pickup.invalid"));
@@ -153,44 +243,101 @@ export function PickupPortal({ initialCode = "" }: PickupPortalProps) {
               </div>
 
               <div className="divide-y">
-                {pickup.files.map((file) => (
-                  <div
-                    key={file.key}
-                    className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                <div className="flex flex-wrap items-center gap-1 px-4 py-2 text-sm">
+                  <Button
+                    type="button"
+                    variant={currentPath ? "ghost" : "outline"}
+                    size="sm"
+                    onClick={() => openDirectory("")}
+                    aria-label={t("files.goRoot")}
                   >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">
-                        {file.fileName}
-                      </p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {file.key}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {formatBytes(file.size)}
-                        {file.exists && file.downloadUrlExpiresAt
-                          ? ` · ${t("pickup.linkExpires", {
-                              date: formatDate(
-                              file.downloadUrlExpiresAt,
-                              language,
-                            ),
-                            })}`
-                          : ""}
-                      </p>
-                    </div>
-                    {file.exists && file.downloadUrl ? (
-                      <Button asChild className="sm:self-center">
-                        <a href={file.downloadUrl}>
-                          <Download className="size-4" />
-                          {t("pickup.download")}
-                        </a>
+                    <Home className="size-4" />
+                    {t("files.rootFolder")}
+                  </Button>
+                  {getPathCrumbs(currentPath).map((crumb) => (
+                    <div key={crumb.path} className="flex items-center gap-1">
+                      <ChevronRight className="size-4 text-muted-foreground" />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => openDirectory(crumb.path)}
+                      >
+                        {crumb.name}
                       </Button>
-                    ) : (
-                      <span className="rounded-md bg-muted px-2 py-1 text-sm text-muted-foreground">
-                        {t("common.fileMissing")}
-                      </span>
-                    )}
-                  </div>
-                ))}
+                    </div>
+                  ))}
+                </div>
+                {entries.map((entry) => {
+                  if (entry.type === "directory") {
+                    return (
+                      <button
+                        key={entry.id}
+                        type="button"
+                        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/50"
+                        onClick={() => openDirectory(entry.path)}
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          <Folder className="size-4 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-medium">
+                              {entry.name}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {t("files.folderSummary", {
+                                count: entry.fileCount,
+                              })}
+                            </span>
+                          </span>
+                        </span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {formatBytes(entry.totalSize)}
+                        </span>
+                      </button>
+                    );
+                  }
+
+                  const file = entry.file;
+
+                  return (
+                    <div
+                      key={file.key}
+                      className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">
+                          {file.fileName.split("/").at(-1) ?? file.fileName}
+                        </p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {file.key}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {formatBytes(file.size)}
+                          {file.exists && file.downloadUrlExpiresAt
+                            ? ` · ${t("pickup.linkExpires", {
+                                date: formatDate(
+                                  file.downloadUrlExpiresAt,
+                                  language,
+                                ),
+                              })}`
+                            : ""}
+                        </p>
+                      </div>
+                      {file.exists && file.downloadUrl ? (
+                        <Button asChild className="sm:self-center">
+                          <a href={file.downloadUrl}>
+                            <Download className="size-4" />
+                            {t("pickup.download")}
+                          </a>
+                        </Button>
+                      ) : (
+                        <span className="rounded-md bg-muted px-2 py-1 text-sm text-muted-foreground">
+                          {t("common.fileMissing")}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ) : (

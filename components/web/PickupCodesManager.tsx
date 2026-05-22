@@ -31,6 +31,8 @@ type PickupFilePreview = {
   key: string;
   bucket: string;
   fileName: string;
+  previewName: string;
+  isDirectory: boolean;
   size: number | null;
 };
 
@@ -45,6 +47,7 @@ type PickupCodeListItem = {
   totalSize: number | null;
   missingFileCount: number;
   filePreview: PickupFilePreview[];
+  previewCount: number;
 };
 
 type StatusInfo = {
@@ -113,20 +116,32 @@ function getFileSummary(
   pickupCode: PickupCodeListItem,
   t: (key: TranslationKey, params?: Record<string, string | number>) => string,
 ) {
-  if (pickupCode.fileCount === 0) {
+  if (pickupCode.previewCount === 0) {
     return t("pickup.noFiles");
   }
 
   const visibleFiles = pickupCode.filePreview.slice(
     0,
-    pickupCode.fileCount > 3 ? 2 : 3,
+    pickupCode.previewCount > 3 ? 2 : 3,
   );
-  const names = visibleFiles.map((file) => file.fileName).join(", ");
-  const remainingCount = pickupCode.fileCount - visibleFiles.length;
+  const names = visibleFiles
+    .map((file) =>
+      file.isDirectory
+        ? t("files.folderName", { name: file.previewName })
+        : file.previewName,
+    )
+    .join(", ");
+  const remainingCount = pickupCode.previewCount - visibleFiles.length;
 
   return remainingCount > 0
     ? t("pickup.moreFiles", { names, count: remainingCount })
     : names;
+}
+
+function getFileSearchText(file: PickupFilePreview) {
+  return (
+    `${file.fileName} ${file.previewName} ${file.key}`.toLocaleLowerCase()
+  );
 }
 
 async function copyToClipboard(
@@ -209,8 +224,7 @@ export function PickupCodesManager() {
         pickupCode.code.toLocaleLowerCase().includes(normalizedQuery) ||
         pickupCode.filePreview.some(
           (file) =>
-            file.fileName.toLocaleLowerCase().includes(normalizedQuery) ||
-            file.key.toLocaleLowerCase().includes(normalizedQuery),
+            getFileSearchText(file).includes(normalizedQuery),
         )
       );
     });
